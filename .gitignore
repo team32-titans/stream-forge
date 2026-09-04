@@ -13,3 +13,4 @@ __pycache__/
 data/
 rocksdb_data/
 *.db
+package-lock.json
