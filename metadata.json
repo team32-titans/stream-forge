@@ -1,0 +1,6 @@
+{
+  "name": "StreamForge - Distributed Stream Processor",
+  "description": "Enterprise-grade distributed Python streaming engine, RocksDB state store, 5-minute rolling window aggregator, Kafka partition rebalancer, and interactive topology monitor.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
