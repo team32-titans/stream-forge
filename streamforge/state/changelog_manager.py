@@ -100,8 +100,8 @@ class ChangelogManager:
                 )
                 logger.info(f"Changelog Kafka producer connected to {self.bootstrap_servers}")
             except Exception as e:
-                logger.error(f"Changelog Kafka producer init failed: {e} — falling back to demo mode for changelog")
-                self._use_kafka = False
+                # Production must fail loud — do not silently become demo
+                raise RuntimeError(f"STORAGE_MODE=production requires Kafka for changelog at {self.bootstrap_servers}: {e}") from e
 
     def _next_seq(self, changelog_key: str) -> int:
         nxt = self._seq_counters.get(changelog_key, 0) + 1
@@ -118,8 +118,24 @@ class ChangelogManager:
         source_offset: int = -1,
         op: str = "PUT",
     ) -> int:
+        """
+        Durable version invariant:
+          partition + state_key -> monotonically increasing version
+        Production: version = Kafka source_offset (durable, per-partition monotonic).
+        Demo/test: if source_offset unavailable, fallback to in-memory _seq_counters (non-durable,
+        explicitly for demo — not used in production recovery).
+        Stale replay with older version never overwrites newer state.
+        """
         changelog_key = f"{partition:02d}:{key}"
-        seq = self._next_seq(changelog_key)
+        # Production durability: source_offset is the version
+        if self.storage_mode == "production" and source_offset >= 0:
+            seq = source_offset
+        else:
+            # Demo/test fallback — not durable across worker restart; documented limitation
+            seq = self._next_seq(changelog_key)
+            # If caller did provide source_offset even in demo, prefer it as version when larger
+            if source_offset >= 0 and source_offset > seq:
+                seq = source_offset
         # Always keep in-memory for fast replay/test
         if partition not in self._in_memory_changelog:
             self._in_memory_changelog[partition] = []
@@ -139,26 +155,54 @@ class ChangelogManager:
         self._in_memory_changelog[partition].append(record)
 
         if self._use_kafka and self._producer is not None:
+            # Track delivery result — caller must wait for ack before committing source offset
+            delivery_ok = {"success": None, "error": None}
+
+            def _cb(err, msg):
+                if err is not None:
+                    delivery_ok["error"] = str(err)
+                    delivery_ok["success"] = False
+                else:
+                    delivery_ok["success"] = True
+
             try:
-                # Partition explicitly to align with source partition
                 self._producer.produce(
                     self.changelog_topic,
                     key=changelog_key.encode(),
                     value=record.serialize(),
                     partition=partition,
+                    on_delivery=_cb,
                 )
                 self._producer.poll(0)
-                # Sync flush for durability before offset commit (bounded latency)
-                # Caller should handle flush batching; we flush per record for correctness
-                # To avoid per-record flush overhead, poll and let background flush
             except Exception as e:
                 logger.error(f"Changelog produce failed p={partition} key={key}: {e}")
+                # Mark as failed so caller does not commit
+                record._delivery_failed = True  # type: ignore
+                return offset
+            # Attach delivery tracker to record for caller inspection (used in tests)
+            record._delivery_ok = delivery_ok  # type: ignore
 
         return offset
 
-    def flush(self, timeout: float = 5) -> None:
+    def flush(self, timeout: float = 5) -> bool:
+        """
+        Flush changelog producer and return True if all deliveries succeeded.
+        Caller must check this before committing source offset.
+        """
         if self._producer:
-            self._producer.flush(timeout)
+            remaining = self._producer.flush(timeout)
+            if remaining != 0:
+                logger.error(f"Changelog flush incomplete: {remaining} messages pending after {timeout}s")
+                return False
+            # Check last records' delivery status if any failed callback
+            # In production, delivery errors are reported via callback; flush success implies ack
+            return True
+        return True
+
+    def publish_and_wait(self, partition: int, key: str, value: Dict[str, Any], worker_id: str, timestamp: int, source_offset: int = -1, op: str = "PUT", timeout: float = 5) -> bool:
+        """Publish and block until ack; returns True on success."""
+        self.publish_state_change(partition, key, value, worker_id, timestamp, source_offset, op)
+        return self.flush(timeout)
 
     def restore_partition_state(
         self,

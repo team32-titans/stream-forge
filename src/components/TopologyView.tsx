@@ -137,14 +137,14 @@ export const TopologyView: React.FC = () => {
               <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-widest flex items-center gap-1.5 mb-1.5">
                 <Cpu className="w-3.5 h-3.5 text-indigo-400" /> 3. 20 Python Workers
               </div>
-              <div className="text-xs font-bold text-white">Faust / Bytewax Runtime</div>
+              <div className="text-xs font-bold text-white">confluent-kafka + Custom Event-Time Engine</div>
               <div className="text-[11px] text-slate-400 mt-1">
                 Cooperative Sticky Group
               </div>
             </div>
             <div className="mt-3 text-[10px] text-indigo-300 bg-indigo-500/15 border border-indigo-500/30 px-2.5 py-1 rounded-xl flex items-center justify-between font-mono">
               <span>Parallelism</span>
-              <span className="font-bold">{healthyWorkers.length}/20 Nodes</span>
+              <span className="font-bold">{healthyWorkers.length}/20 Worker Containers</span>
             </div>
           </div>
 
@@ -180,7 +180,7 @@ export const TopologyView: React.FC = () => {
             </div>
             <div className="mt-3 text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl flex items-center justify-between font-mono">
               <span>Delivery</span>
-              <span className="font-bold">Exactly-Once</span>
+              <span className="font-bold">Effectively-Once*</span>
             </div>
           </div>
         </div>
@@ -235,7 +235,7 @@ export const TopologyView: React.FC = () => {
               ACTIVE PYTHON WORKER NODES (20 PROCESSES)
             </h3>
             <p className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5">
-              Each worker runs Faust/Bytewax event loops, local RocksDB store, and independent 5-min window accumulators
+              Each worker runs confluent-kafka consumer loop, local RocksDB store, and independent 5-min window accumulators
             </p>
           </div>
 
@@ -361,7 +361,7 @@ export const TopologyView: React.FC = () => {
                   </span>
                 </h4>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Faust AsyncIO Event Loop • Local RocksDB instance • Murmur2 Partition Worker
+                  confluent-kafka Consumer Loop • Local RocksDB instance • CRC32 Partition Worker
                 </p>
               </div>
             </div>

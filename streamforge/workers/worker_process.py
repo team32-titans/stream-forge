@@ -77,19 +77,39 @@ def on_revoke(partitions):
                 logger.error(f"Close failed p={pid}: {e}")
 
 
+def _get_real_lag(consumer, s) -> int:
+    """Fetch real consumer lag via position vs high watermark (best effort)."""
+    try:
+        # Use AdminClient to get high watermark is heavy; use consumer position if available
+        # Fallback to 0 if not determinable
+        from confluent_kafka import TopicPartition
+
+        parts = consumer._consumer.assignment() if hasattr(consumer, "_consumer") else []
+        total_lag = 0
+        for tp in parts:
+            try:
+                low, high = consumer._consumer.get_watermark_offsets(tp, timeout=1)
+                pos = consumer._consumer.position([tp])
+                ppos = pos[0].offset if pos and pos[0].offset >= 0 else high
+                total_lag += max(0, high - ppos)
+            except Exception:
+                continue
+        return total_lag
+    except Exception:
+        return 0
+
+
 def main():
     global changelog, running
     s = get_settings()
-    # Worker ID from hostname if not set
-    if s.worker_id == "worker-01" and os.environ.get("HOSTNAME"):
-        # Docker hostname
-        hn = os.environ["HOSTNAME"]
-        # Use hostname as worker_id if looks like worker
-        if "worker" in hn:
-            os.environ["WORKER_ID"] = hn
-            from streamforge.config import reload_settings
+    # Worker ID from hostname — Docker Compose generates unique container IDs;
+    # HOSTNAME is unique per container, use it directly without relying on Swarm templating.
+    hn = os.environ.get("HOSTNAME") or os.environ.get("HOST") or ""
+    if s.worker_id == "worker-01" and hn and hn != "localhost":
+        os.environ["WORKER_ID"] = hn
+        from streamforge.config import reload_settings
 
-            s = reload_settings()
+        s = reload_settings()
 
     worker_id = s.worker_id
     logger.info(f"Starting worker {worker_id} storage_mode={s.storage_mode} bootstrap={s.kafka_bootstrap_servers}")
@@ -172,38 +192,66 @@ def main():
                     pass
                 continue
 
+            changelog_ok = True
             if results:
                 for res in results:
                     key = f"{res.truck_id}:{res.window_start}"
                     val = res.model_dump(mode="json")
-                    val["seq"] = val.get("seq", 1)
-                    # Enrich with seq/source_offset for protocol
-                    store.put(key, val)
-                    # Changelog produce — source_offset from msg.offset()
-                    changelog.publish_state_change(
-                        partition=pid,
-                        key=key,
-                        value=val,
-                        worker_id=worker_id,
-                        timestamp=int(time.time() * 1000),
-                        source_offset=msg.offset(),
-                    )
+                    # Durable version = Kafka source offset (see changelog_manager protocol)
+                    val["seq"] = msg.offset()
+                    val["source_offset"] = msg.offset()
+                    try:
+                        store.put(key, val)
+                    except Exception as e:
+                        logger.error(f"RocksDB put failed p={pid} key={key}: {e}")
+                        exporter.counters["streamforge_events_failed_total"] += 1
+                        changelog_ok = False
+                        break
+                    try:
+                        changelog.publish_state_change(
+                            partition=pid,
+                            key=key,
+                            value=val,
+                            worker_id=worker_id,
+                            timestamp=int(time.time() * 1000),
+                            source_offset=msg.offset(),
+                        )
+                    except Exception as e:
+                        logger.error(f"Changelog publish failed p={pid} key={key}: {e}")
+                        exporter.counters["streamforge_changelog_failures_total"] = exporter.counters.get("streamforge_changelog_failures_total", 0) + 1
+                        changelog_ok = False
+                        break
                     exporter.counters["streamforge_window_updates_total"] += 1
 
-            # Commit only after state + changelog ack (flush batch)
-            if s.storage_mode == "production":
-                # Batch flush handled by manager; commit now
-                changelog.flush(0.1)
-
-            try:
-                consumer.commit(msg)
-            except Exception as e:
-                logger.error(f"Commit failed: {e}")
+            # Crash consistency: commit only if RocksDB + changelog ack succeeded
+            if changelog_ok:
+                if s.storage_mode == "production":
+                    flushed = changelog.flush(timeout=5)
+                    if not flushed:
+                        logger.error("Changelog flush failed — NOT committing source offset, will redeliver")
+                        exporter.counters["streamforge_changelog_failures_total"] = exporter.counters.get("streamforge_changelog_failures_total", 0) + 1
+                        changelog_ok = False
+                if changelog_ok:
+                    try:
+                        consumer.commit(msg)
+                    except Exception as e:
+                        logger.error(f"Commit failed: {e}")
+                else:
+                    logger.warning(f"Skipping commit for offset {msg.offset()} p={pid} due to changelog failure")
+            else:
+                logger.warning(f"Skipping commit for offset {msg.offset()} p={pid} due to earlier failure")
 
             exporter.counters["streamforge_events_processed_total"] += 1
             exporter.counters["streamforge_partition_events_total"] = exporter.counters.get("streamforge_partition_events_total", 0) + 1
             events_in_interval += 1
-            exporter.gauges["streamforge_consumer_lag"] = 0  # TODO: fetch real lag via AdminClient
+            # Real lag every 5s (avoid per-message overhead)
+            now_lag = time.time()
+            if now_lag - last_report >= 5 or events_in_interval % 100 == 0:
+                try:
+                    exporter.gauges["streamforge_consumer_lag"] = _get_real_lag(consumer, s)
+                    exporter.set_lag(int(exporter.gauges["streamforge_consumer_lag"]))
+                except Exception:
+                    pass
 
             # Heartbeat throughput every 5s
             now = time.time()

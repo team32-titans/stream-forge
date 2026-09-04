@@ -26,7 +26,7 @@ Guarantee partition-aware, idempotent state recovery with no silent loss, withou
   "worker_id": "worker-04"
 }
 ```
-`seq` monotonic per `(partition, state_key)`. `source_offset` is Kafka offset of event that produced this version.
+`seq` = durable version = **Kafka source offset** per `(partition, state_key)` (monotonic per partition). Invariant: `partition+state_key -> seq` never moves backwards; worker restart/reassignment cannot reset it; stale replay with smaller seq never overwrites newer. In production, `seq == source_offset`; in demo/test where offset unavailable, fallback counter is non-durable and explicitly documented.
 
 ## 4. Changelog Topic
 *Name* `streamforge.truck_state.changelog`, partitions=32 aligned, `cleanup.policy=compact`.
@@ -40,14 +40,15 @@ Per `(partition, state_key)` total order via Kafka partition order. Global order
 ## 6. Produce Order (critical)
 ```
 RocksDB put
-  -> changelog produce (sync ack, seq+1)
-    -> commit source offset (only after ack)
+  -> changelog produce (ack via on_delivery + flush)
+    -> commit source offset (only if flush ack succeeded)
 ```
-If crash before changelog ack, at most one update lost (bounded).
+Crash semantics: RocksDB fail -> no commit; changelog fail -> no commit; crash before commit -> redelivery (idempotent via seq); success path -> durable. RPO/RTO not pre-claimed — measured after chaos test.
 
-## 7. Replay
+## 7. Replay & Isolation
 On `on_partitions_assigned([p])`:
-1. open `RocksDBStateStore(/data/rocksdb/p{p}, p)` (empty or stale)
+1. open `RocksDBStateStore(/data/rocksdb/p{p}, p)` on **ephemeral tmpfs per worker** (no shared volume). Recovery is via changelog, not shared files, so two workers cannot concurrently mutate same partition during rebalance.
+
 2. assign `TopicPartition(changelog_topic, p, OFFSET_BEGINNING)` to changelog consumer
 3. for each record in order: if `rec.seq > local.get(key).seq` then `put`, else skip; DELETE tombstone -> `delete`
 4. commit is not needed for changelog consumer (internal)

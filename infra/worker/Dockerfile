@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt requirements-dev.txt* ./
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir rocksdict || echo "rocksdict build failed — will use demo fallback check"
+    && pip install --no-cache-dir rocksdict==0.3.28
 
 COPY streamforge ./streamforge
 COPY main.py ./
@@ -20,5 +20,7 @@ COPY infra ./infra
 
 # Production mode must have real RocksDB — fail fast if rocksdict missing
 ENV STORAGE_MODE=production
+# Verify rocksdict import at build time
+RUN python -c "import rocksdict; print(f'rocksdict {rocksdict.__version__} ready')"
 
 CMD ["python", "-m", "streamforge.workers.worker_process"]

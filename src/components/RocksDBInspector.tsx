@@ -91,7 +91,7 @@ export const RocksDBInspector: React.FC = () => {
             </div>
             <div className="text-xs font-semibold text-slate-200">Sequential Append-Only</div>
             <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-              Guarantees zero data loss if power fails before MemTable flush.
+              WAL aids durability; production RocksDB sync_wal=false trades durability for throughput (see docs).
             </p>
             <div className="mt-3 text-[10px] font-mono text-slate-400 bg-slate-900/60 p-2 rounded-xl border border-slate-800">
               wal_offset: <span className="text-rose-300 font-bold">#45,820</span>
