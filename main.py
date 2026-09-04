@@ -202,7 +202,7 @@ def run_chaos_demo() -> None:
     print(f"\n[STEP 5] Verification of Recovered State in '{new_owner}':")
     print(f"  >> Recovered Payload: {recovered}")
     assert recovered == payload, "State mismatch detected during failover!"
-    print("  >> ZERO DATA LOSS CONFIRMED. RPO = 0, RTO < 50ms.")
+    print("  >> State recovery verified for this in-memory demo. RPO/RTO not claimed until measured on real Kafka.")
     print("=" * 75)
     store_recovery.close()
 

@@ -101,40 +101,44 @@ class TestRocksDBStateAndChaosRecovery:
     """Simulates Member 1 key scenario: Worker #4 dies, Worker #5 recovers state."""
 
     def test_worker_crash_and_state_recovery(self, tmp_path):
+        # Use partition 6 (even -> owned by worker-04 when 2 workers: p%2==0)
+        chosen_partition = 6
         db_path_4 = str(tmp_path / "worker4_rocksdb")
         db_path_5 = str(tmp_path / "worker5_rocksdb")
 
         changelog_mgr = ChangelogManager()
 
-        # Step 1: Worker 4 processes telemetry for partition 7 and persists state
-        store_4 = RocksDBStateStore(db_path=db_path_4, partition_id=7)
+        # Step 1: Worker 4 processes telemetry for partition and persists state
+        store_4 = RocksDBStateStore(db_path=db_path_4, partition_id=chosen_partition)
         state_payload = {"count": 140, "sum": -2800.0, "avg": -20.0, "min": -23.0, "max": -17.0}
-        
+
         # Save to local RocksDB + Mirror to Kafka Changelog
         store_4.put("TRK-00492:1709280000", state_payload)
         changelog_mgr.publish_state_change(
-            partition=7,
+            partition=chosen_partition,
             key="TRK-00492:1709280000",
             value=state_payload,
             worker_id="worker-04",
             timestamp=int(time.time() * 1000),
+            source_offset=100,
         )
         store_4.close()
 
-        # Step 2: Worker 4 crashes! Rebalancer assigns partition 7 to Worker 5
+        # Step 2: Worker 4 crashes! Rebalancer assigns partition to Worker 5
         rebalancer = CooperativeStickyRebalancer(total_partitions=32, changelog_manager=changelog_mgr)
         rebalancer.register_worker("worker-04")
         rebalancer.register_worker("worker-05")
-        
-        # Simulate Worker 4 failure
+
+        # Verify chosen partition is owned by worker-04 before failure
+        assert rebalancer.assignments[chosen_partition] == "worker-04"
         orphaned = rebalancer.handle_worker_failure("worker-04")
-        assert 7 in orphaned or True
+        assert chosen_partition in orphaned
 
         # Step 3: Worker 5 initializes clean RocksDB and restores state from changelog
-        store_5 = RocksDBStateStore(db_path=db_path_5, partition_id=7)
+        store_5 = RocksDBStateStore(db_path=db_path_5, partition_id=chosen_partition)
         assert store_5.get("TRK-00492:1709280000") is None  # Initially empty
 
-        restored_count = changelog_mgr.restore_partition_state(partition=7, target_store=store_5)
+        restored_count = changelog_mgr.restore_partition_state(partition=chosen_partition, target_store=store_5)
         assert restored_count >= 1
 
         # Step 4: Verify recovered state in Worker 5 matches exactly!

@@ -70,6 +70,7 @@ class TemperatureAccumulator:
             "min": self.min_temp if self.count > 0 else 0.0,
             "max": self.max_temp if self.count > 0 else 0.0,
             "std_dev": self.std_dev,
+            "m2": self._m2,
         }
 
     @classmethod
@@ -79,6 +80,7 @@ class TemperatureAccumulator:
         acc.sum_temp = float(data.get("sum", 0.0))
         acc.min_temp = float(data.get("min", float("inf")))
         acc.max_temp = float(data.get("max", float("-inf")))
+        acc._m2 = float(data.get("m2", data.get("_m2", 0.0)))
         return acc
 
 
@@ -190,9 +192,9 @@ class WindowedRollingAverageProcessor:
             # Do not merge into closed window — side output or drop per config
             if settings.late_event_policy == "drop":
                 return (None, [])
-            # side_output: return event as late signal, caller counts metric
-            # Still advance watermark with this event's timestamp if it's newer? No — late events don't advance max
-            return (None, [])
+            # side_output: return event as late signal via first tuple element; caller counts metric and optionally routes to DLQ
+            # Late events do not advance max_event_time
+            return (event, [])  # type: ignore
 
         watermark = self.watermark_gen.on_event(event.timestamp)
 

@@ -55,7 +55,7 @@ export const Member1Handbook: React.FC = () => {
           Project Review Introduction Script (Elevator Pitch)
         </div>
         <blockquote className="bg-[#05070a] p-4 rounded-2xl border border-slate-700/50 text-xs text-slate-200 leading-relaxed font-sans italic">
-          &ldquo;Hello everyone. In StreamForge, I am <strong>Member 1</strong>, responsible for the <strong>Core Stream Processing & Stateful Engine</strong>. My mission was to build a pure Python distributed streaming pipeline capable of processing <strong>100,000 events/second</strong> for 50,000 IoT refrigerated trucks. I engineered the <strong>5-minute rolling window aggregation engine</strong> using Welford's incremental statistical algorithm, integrated the <strong>embedded RocksDB LSM-Tree state store</strong> with Write-Ahead-Logging, and built the <strong>zero-data-loss failover protocol</strong> that guarantees seamless state recovery when a worker node crashes.&rdquo;
+          &ldquo;Hello everyone. In StreamForge, I am <strong>Member 1</strong>, responsible for the <strong>Core Stream Processing & Stateful Engine</strong>. My mission was to build a pure Python distributed streaming pipeline targeting <strong>100,000 events/second</strong> (honest benchmark on dev laptop: ~4.6k evt/s in-memory, see docs/BENCHMARK.md) for 50,000 IoT refrigerated trucks. I engineered the <strong>5-minute rolling window aggregation engine</strong> using Welford's incremental algorithm, integrated the <strong>embedded RocksDB LSM-Tree state store</strong> with WAL, and built the <strong>effectively-once failover protocol</strong> (at-least-once + idempotent source_offset) with changelog replay.&rdquo;
         </blockquote>
       </div>
 

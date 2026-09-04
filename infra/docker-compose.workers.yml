@@ -19,12 +19,13 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
-    volumes:
-      - worker_rocksdb:/data/rocksdb
-    deploy:
-      replicas: 20
-    # Each container gets distinct WORKER_ID via hostname
-    hostname: "worker-{{.Task.Slot}}"
+    # No shared RocksDB volume — each worker has ephemeral state
+    # Recovery is via Kafka changelog replay, not shared files.
+    # See docs/STATE_CHANGELOG_PROTOCOL.md recovery model:
+    #   A owns P -> A persists changelog -> A dies -> B assigned P -> B replays changelog
+    # Shared volume would allow concurrent mutation during rebalance — avoided.
+    tmpfs:
+      - /data/rocksdb
 
   # Kafka must be included when using this file standalone
   kafka:
@@ -49,5 +50,4 @@ services:
       retries: 20
       start_period: 15s
 
-volumes:
-  worker_rocksdb:
+# No named volumes — ephemeral tmpfs per worker (see above)

@@ -34,8 +34,10 @@ class FleetTelemetryGenerator:
         ]
 
     def _get_partition(self, truck_id: str) -> int:
-        """Consistent Murmur2 hashing to distribute trucks evenly across partitions."""
-        return hash(truck_id) % self.num_partitions
+        """Deterministic partition via crc32 (stable across restarts, Murmur2-like)."""
+        import zlib
+
+        return zlib.crc32(truck_id.encode("utf-8")) % self.num_partitions
 
     def generate_event(self, truck_index: int, inject_anomaly: bool = False) -> TruckTelemetryEvent:
         """Generate a single high-fidelity telemetry event."""

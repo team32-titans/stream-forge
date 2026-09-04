@@ -364,7 +364,7 @@ export class StreamForgeSimulation {
       timestamp: Date.now(),
       type: 'WORKER_KILL',
       targetWorker: workerId,
-      description: `Simulated SIGKILL on ${workerId}. Rebalancing Partitions [${orphanedPartitions.join(', ')}] with zero data loss.`,
+      description: `[DEMO] Simulated SIGKILL on ${workerId}. Rebalancing Partitions [${orphanedPartitions.join(', ')}] (effectively-once demo).`,
       recoveryLog: [
         `[T+00ms] SIGKILL sent to ${workerId}. Process terminated abruptly mid-window aggregation.`,
         `[T+40ms] Kafka Broker missed consumer heartbeat. Consumer Group coordinator triggered REBALANCE_REQUIRED.`,
