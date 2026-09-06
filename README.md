@@ -1,6 +1,6 @@
 # StreamForge (SteamForge)
 
-> **Enterprise-Grade Distributed Stateful Event Streaming Engine & Real-Time Observability Control Plane**
+> **Enterprise-Grade Distributed Stateful Event Streaming Engine & Real-Time Observability Control plane**
 
 [![React](https://img.shields.io/badge/React-18.x-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://reactjs.org/)
 [![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
