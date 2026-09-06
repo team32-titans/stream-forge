@@ -216,7 +216,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
 
           <div className="h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={partitions.slice(0, 16)}>
+              <BarChart data={partitions.slice(0, 16).map((p) => ({ partitionId: p.partitionId, lag: p.lag }))}>
                 <XAxis dataKey="partitionId" stroke="#64748b" fontSize={10} tickFormatter={(val) => `P${val}`} />
                 <YAxis stroke="#64748b" fontSize={10} />
                 <Tooltip

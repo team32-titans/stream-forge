@@ -178,8 +178,9 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             { id: 'rocksdb', label: 'RocksDB State', icon: Database },
             { id: 'fleet', label: '50k Fleet Stream', icon: Radio },
             { id: 'metrics', label: 'Prometheus Metrics', icon: Activity },
-            { id: 'code', label: 'Python OOP Code', icon: Code2, badge: 'PEP 8' },
+            { id: 'code', label: 'Python Engine & CLI', icon: Code2, badge: 'Python 3.10', highlight: true },
             { id: 'handbook', label: 'Viva Handbook', icon: BookOpen, badge: 'Defense' },
+
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;

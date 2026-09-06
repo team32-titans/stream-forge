@@ -117,10 +117,13 @@ export class StreamForgeSimulation {
     this.workers.forEach((w) => (w.assignedPartitions = []));
 
     // Evenly assign 32 partitions to healthy workers
-    this.partitions.forEach((p, idx) => {
+    this.partitions = this.partitions.map((p, idx) => {
       const targetWorker = healthyWorkers[idx % healthyWorkers.length];
-      p.assignedWorker = targetWorker.id;
       targetWorker.assignedPartitions.push(p.partitionId);
+      return {
+        ...p,
+        assignedWorker: targetWorker.id,
+      };
     });
 
     this.metrics.activeWorkers = this.workers.filter((w) => w.status !== 'CRASHED').length;
@@ -251,17 +254,25 @@ export class StreamForgeSimulation {
     this.recentEvents = [...newEvents, ...this.recentEvents].slice(0, 30);
 
     // Update worker stats
-    this.workers.forEach((w) => {
+    this.workers = this.workers.map((w) => {
       if (w.status === 'HEALTHY') {
         const shareOfEvents = Math.floor(this.eventRate / totalHealthy);
-        w.eventsProcessed += shareOfEvents;
-        w.processingRate = shareOfEvents + Math.floor((Math.random() - 0.5) * 200);
-        w.cpuUsage = Math.min(95, Math.floor(30 + (this.eventRate / 100000) * 45 + Math.random() * 10));
-        w.rocksDbState.walOffset += Math.floor(shareOfEvents * 0.4);
-        w.rocksDbState.lastChangelogOffset = w.rocksDbState.walOffset;
-        w.rocksDbState.memTableEntries = (w.rocksDbState.memTableEntries + 8) % 500;
-        w.lastHeartbeat = now;
+        const newWalOffset = w.rocksDbState.walOffset + Math.floor(shareOfEvents * 0.4);
+        return {
+          ...w,
+          eventsProcessed: w.eventsProcessed + shareOfEvents,
+          processingRate: shareOfEvents + Math.floor((Math.random() - 0.5) * 200),
+          cpuUsage: Math.min(95, Math.floor(30 + (this.eventRate / 100000) * 45 + Math.random() * 10)),
+          rocksDbState: {
+            ...w.rocksDbState,
+            walOffset: newWalOffset,
+            lastChangelogOffset: newWalOffset,
+            memTableEntries: (w.rocksDbState.memTableEntries + 8) % 500,
+          },
+          lastHeartbeat: now,
+        };
       }
+      return w;
     });
 
     // Update metrics
@@ -274,12 +285,18 @@ export class StreamForgeSimulation {
     this.metrics.totalLag = Math.floor(Math.random() * 180);
     this.metrics.changelogReplicationRate = Math.floor(this.metrics.currentThroughput * 0.998);
 
-    // Update partition lag
-    this.partitions.forEach((p) => {
-      p.currentOffset += Math.floor(this.eventRate / this.totalPartitionsCount);
-      p.logEndOffset = p.currentOffset + Math.floor(Math.random() * 12);
-      p.lag = p.logEndOffset - p.currentOffset;
-      p.throughput = Math.floor(this.metrics.currentThroughput / this.totalPartitionsCount);
+    // Update partition lag with fresh immutable objects
+    const deltaOffset = Math.floor(this.eventRate / this.totalPartitionsCount);
+    this.partitions = this.partitions.map((p) => {
+      const currentOffset = p.currentOffset + deltaOffset;
+      const logEndOffset = currentOffset + Math.floor(Math.random() * 12);
+      return {
+        ...p,
+        currentOffset,
+        logEndOffset,
+        lag: logEndOffset - currentOffset,
+        throughput: Math.floor(this.metrics.currentThroughput / this.totalPartitionsCount),
+      };
     });
 
     this.notify();
@@ -402,10 +419,15 @@ export class StreamForgeSimulation {
       // Step 3: Complete State Restoration & Resume
       await new Promise((r) => setTimeout(r, 800));
       standbyWorker.assignedPartitions.push(...orphanedPartitions);
-      orphanedPartitions.forEach((pId) => {
-        if (this.partitions[pId]) {
-          this.partitions[pId].assignedWorker = standbyWorker.id;
+      const orphanedSet = new Set(orphanedPartitions);
+      this.partitions = this.partitions.map((p) => {
+        if (orphanedSet.has(p.partitionId)) {
+          return {
+            ...p,
+            assignedWorker: standbyWorker.id,
+          };
         }
+        return p;
       });
       standbyWorker.status = 'HEALTHY';
       chaosEvent.status = 'RESOLVED';

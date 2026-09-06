@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
 import { PartitionState, WorkerNode } from '../types/stream';
+import { KafkaPartitionVisualizer, computePartitionRanges } from './KafkaPartitionVisualizer';
 
 export const TopologyView: React.FC = () => {
   const [workers, setWorkers] = useState<WorkerNode[]>(streamSimulation.workers);
@@ -186,45 +187,13 @@ export const TopologyView: React.FC = () => {
         </div>
       </div>
 
-      {/* Bento Section 2: 32 Kafka Partitions Heatmap Bar */}
-      <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-5 shadow-xl">
-        <div className="flex items-center justify-between mb-3.5">
-          <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-indigo-400" />
-            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-300">
-              Kafka Partitions Allocation Map (32 Partitions across 20 Workers)
-            </h3>
-          </div>
-          <span className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">
-            Key: Murmur2(truck_id) % 32
-          </span>
-        </div>
-
-        <div className="grid grid-cols-8 sm:grid-cols-16 lg:grid-cols-32 gap-1.5">
-          {partitions.map((p) => {
-            const assigned = workers.find((w) => w.id === p.assignedWorker);
-            const isCrashed = assigned?.status === 'CRASHED';
-            const isRecovering = assigned?.status === 'RECOVERING';
-
-            let bgClass = 'bg-slate-900/80 text-indigo-300 border-slate-700/60';
-            if (isCrashed) bgClass = 'bg-rose-500/30 text-rose-300 border-rose-500/50 animate-pulse';
-            else if (isRecovering) bgClass = 'bg-amber-500/30 text-amber-300 border-amber-500/50 animate-pulse';
-
-            return (
-              <div
-                key={p.partitionId}
-                className={`p-1.5 rounded-xl border text-center font-mono cursor-pointer transition hover:scale-105 ${bgClass}`}
-                title={`Partition ${p.partitionId} -> ${p.assignedWorker || 'Unassigned'} (Lag: ${p.lag})`}
-              >
-                <div className="text-[10px] font-bold">P{p.partitionId}</div>
-                <div className="text-[8px] opacity-70 truncate">
-                  {p.assignedWorker ? p.assignedWorker.replace('worker-', 'W') : 'None'}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {/* Bento Section 2: Real-Time Kafka Partition Visualizer */}
+      <KafkaPartitionVisualizer
+        workers={workers}
+        partitions={partitions}
+        selectedWorker={selectedWorker}
+        onSelectWorker={setSelectedWorker}
+      />
 
       {/* Bento Section 3: 20 Python Worker Nodes Grid */}
       <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl">
@@ -297,14 +266,18 @@ export const TopologyView: React.FC = () => {
                     </span>
                   </div>
 
-                  {/* Partitions Badge */}
-                  <div className="text-[11px] text-slate-400 mb-3 flex items-center justify-between">
-                    <span>Partitions ({w.assignedPartitions.length}):</span>
-                    <span className="font-mono text-indigo-300 font-semibold">
-                      {w.assignedPartitions.length > 0
-                        ? `[${w.assignedPartitions.join(', ')}]`
-                        : 'None (Crashed)'}
-                    </span>
+                  {/* Partition Range & Partitions Badge */}
+                  <div className="bg-[#05070a]/70 p-2 rounded-xl border border-slate-800/80 mb-3 space-y-1">
+                    <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                      <span>Partition Range:</span>
+                      <span className="font-mono text-indigo-300 font-bold">
+                        {computePartitionRanges(w.assignedPartitions).map((r) => r.label).join(', ') || 'None (Crashed)'}
+                      </span>
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-mono truncate flex items-center justify-between">
+                      <span>Partitions ({w.assignedPartitions.length}):</span>
+                      <span>[{w.assignedPartitions.join(', ')}]</span>
+                    </div>
                   </div>
 
                   {/* CPU / Rate bar */}
@@ -381,8 +354,14 @@ export const TopologyView: React.FC = () => {
                 <Cpu className="w-3.5 h-3.5 text-indigo-400" /> Runtime Stats
               </div>
               <div className="flex justify-between py-1 border-b border-slate-800 font-mono">
-                <span className="text-slate-400 font-sans">Assigned Partitions:</span>
+                <span className="text-slate-400 font-sans">Partition Range:</span>
                 <span className="text-indigo-300 font-bold">
+                  {computePartitionRanges(selectedWorker.assignedPartitions).map((r) => r.label).join(', ') || 'None (Crashed)'}
+                </span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800 font-mono">
+                <span className="text-slate-400 font-sans">Assigned Partitions:</span>
+                <span className="text-slate-200">
                   [{selectedWorker.assignedPartitions.join(', ')}]
                 </span>
               </div>
