@@ -2,7 +2,18 @@
 
 > **Distributed stateful streaming for 50,000 cold-chain trucks — 32 Kafka partitions, 5-min event-time windows, RocksDB, changelog recovery, 20 scalable worker containers.**
 
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python)](#) [![Kafka](https://img.shields.io/badge/Kafka-3.7-231F20?style=for-the-badge&logo=apachekafka)](#) [![RocksDB](https://img.shields.io/badge/RocksDB-rocksdict-8B0000?style=for-the-badge)](#) [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?style=for-the-badge)](#) [![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react)](#)
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python)](#) [![Kafka](https://img.shields.io/badge/Kafka-3.7-231F20?style=for-the-badge&logo=apachekafka)](#) [![RocksDB](https://img.shields.io/badge/RocksDB-rocksdict-8B0000?style=for-the-badge)](#) [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?style=for-the-badge)](#) [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react)](#)
+
+## Contents
+
+- [Project Overview](#1-project-overview)
+- [Architecture](#2-architecture)
+- [Quick Start](#6-quick-start)
+- [Kafka Topics](#7-kafka-topics)
+- [State & Changelog Protocol](#10-state--changelog-protocol)
+- [Tests](#15-tests)
+- [Benchmark](#16-benchmark)
+- [Limitations](#17-chaos--limitations)
 
 ## 1. Project Overview
 
@@ -74,6 +85,17 @@ docs/STATE_CHANGELOG_PROTOCOL.md, docs/BENCHMARK.md
 
 ## 6. Quick Start
 
+### Frontend demo (no Kafka required)
+
+The dashboard can run independently with simulated metrics. This is the fastest way to explore the topology, windowing, chaos, and metrics views:
+
+```powershell
+npm install
+npm run dev
+```
+
+Open <http://localhost:3000/?demo>. The yellow DEMO banner confirms that the dashboard is using `simulationEngine.ts`, not a live Kafka cluster.
+
 ### Python env (Windows PowerShell)
 ```powershell
 py -m venv .venv
@@ -104,9 +126,10 @@ docker compose -f infra/docker-compose.workers.yml ps  # 20 containers, unique H
 ### FastAPI + Frontend
 ```powershell
 python -m streamforge.cli api  # :8000, /api/health /metrics WS /ws/metrics
-npm install
 npm run dev  # Vite :3000 proxy /api -> :8000, ?demo toggles simulation
 ```
+
+Without `?demo`, the dashboard connects to FastAPI through the Vite proxy. Set `VITE_DEMO_MODE=true` when you want demo mode to be the default for local development.
 
 ### CLI
 ```powershell
