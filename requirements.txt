@@ -1,32 +1,16 @@
 # ==============================================================================
 # StreamForge - Production Python Dependencies
-# Each dependency has a concrete purpose — do not add speculative packages.
 # ==============================================================================
-# Core validation & settings (interfaces, config.py)
+# Core typing and data validation (Pydantic v2)
 pydantic>=2.5.0
-pydantic-settings>=2.0.0
 typing-extensions>=4.8.0
-python-dotenv>=1.0.0
 
-# Kafka client — single client per architecture decision #1 (confluent-kafka = librdkafka)
-confluent-kafka>=2.4.0
-
-# Prometheus metrics — real client (not fake dict)
+# Enterprise Prometheus metrics exporter
 prometheus-client>=0.19.0
 
-# FastAPI control plane
-fastapi>=0.110.0
-uvicorn[standard]>=0.29.0
-
-# CLI
-typer>=0.12.0
-
-# RocksDB — real implementation for production Docker workers only
-# On Windows/demo/test, STORAGE_MODE=demo uses in-memory fallback explicitly
-# rocksdict requires Linux (install inside infra/worker/Dockerfile)
-# rocksdict>=0.3.28
-
-# Testing & chaos (also available via requirements-dev.txt)
+# Testing & chaos engineering
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
-httpx>=0.27.0
+
+# Embedded LSM-Tree RocksDB acceleration (optional, falls back to in-memory WAL engine)
+# rocksdict>=0.3.28
