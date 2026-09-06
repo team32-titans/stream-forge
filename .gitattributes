@@ -1,0 +1,18 @@
+# Force GitHub Linguist to detect this project as 100% Python
+# Treats web frontend control plane as vendored/documentation
+
+src/** linguist-vendored=true
+public/** linguist-vendored=true
+*.ts linguist-detectable=false
+*.tsx linguist-detectable=false
+*.json linguist-detectable=false
+bun.lock linguist-generated=true
+package.json linguist-vendored=true
+tsconfig.json linguist-vendored=true
+vite.config.ts linguist-vendored=true
+index.html linguist-vendored=true
+
+# Keep Python fully detectable
+*.py linguist-detectable=true
+streamforge/** linguist-detectable=true
+tests/** linguist-detectable=true

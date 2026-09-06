@@ -34,18 +34,18 @@ class TemperatureAccumulator:
         self._m2: float = 0.0  # Sum of squared differences for Welford's algorithm
 
     def add(self, temp: float) -> None:
-        """Incorporate a new temperature sample into the running statistics."""
+        """Incorporate a new temperature sample — correct Welford."""
+        # Welford needs old mean
+        old_mean = self.sum_temp / self.count if self.count > 0 else 0.0
         self.count += 1
         self.sum_temp += temp
         if temp < self.min_temp:
             self.min_temp = temp
         if temp > self.max_temp:
             self.max_temp = temp
-
-        # Online variance calculation (Welford's method)
-        delta = temp - (self.sum_temp / self.count)
-        delta2 = temp - ((self.sum_temp + temp) / (self.count + 1) if self.count > 0 else temp)
-        self._m2 += delta * delta2
+        new_mean = self.sum_temp / self.count
+        # Welford: M2 += (x - old_mean)*(x - new_mean)
+        self._m2 += (temp - old_mean) * (temp - new_mean)
 
     @property
     def average(self) -> float:
@@ -70,6 +70,7 @@ class TemperatureAccumulator:
             "min": self.min_temp if self.count > 0 else 0.0,
             "max": self.max_temp if self.count > 0 else 0.0,
             "std_dev": self.std_dev,
+            "m2": self._m2,
         }
 
     @classmethod
@@ -79,6 +80,7 @@ class TemperatureAccumulator:
         acc.sum_temp = float(data.get("sum", 0.0))
         acc.min_temp = float(data.get("min", float("inf")))
         acc.max_temp = float(data.get("max", float("-inf")))
+        acc._m2 = float(data.get("m2", data.get("_m2", 0.0)))
         return acc
 
 
@@ -172,22 +174,37 @@ class WindowedRollingAverageProcessor:
         self, event: TruckTelemetryEvent
     ) -> Tuple[Optional[WindowedAggregateResult], List[WindowedAggregateResult]]:
         """
+        Pipeline: Filter(T>0) is handled upstream; this method assumes validated events.
         1. Evaluates watermark against event timestamp.
-        2. Assigns event to appropriate 5-minute windows.
-        3. Updates rolling accumulator.
-        4. Evaluates window closure and triggers emission of completed aggregates.
+        2. Checks late policy (side_output/drop) before merging.
+        3. Assigns event to appropriate 5-minute windows.
+        4. Updates rolling accumulator.
+        5. Evaluates window closure and triggers emission.
+        Returns (late_side_output, emitted_closed_windows).
         """
-        watermark = self.watermark_gen.on_event(event.timestamp)
+        from streamforge.config import get_settings
+
+        settings = get_settings()
+        # Late check BEFORE watermark advance: event is late if timestamp < last watermark
         is_late = self.watermark_gen.is_event_late(event.timestamp)
         event.is_late = is_late
+        if is_late:
+            # Do not merge into closed window — side output or drop per config
+            if settings.late_event_policy == "drop":
+                return (None, [])
+            # side_output: return event as late signal via first tuple element; caller counts metric and optionally routes to DLQ
+            # Late events do not advance max_event_time
+            return (event, [])  # type: ignore
+
+        watermark = self.watermark_gen.on_event(event.timestamp)
 
         assigned_windows = self.assigner.assign_windows(event.timestamp)
-        
+
         for win in assigned_windows:
             state_key = (event.truck_id, win.start_ms)
             if state_key not in self.active_windows:
                 self.active_windows[state_key] = TemperatureAccumulator()
-            
+
             self.active_windows[state_key].add(event.temperature)
 
         # Evaluate window trigger conditions (Event-Time Watermark > Window End)
@@ -217,3 +234,16 @@ class WindowedRollingAverageProcessor:
             del self.active_windows[key]
 
         return (None, emitted_results)
+
+    # Back-compat alias — main.py and tests call process_event
+    def process_event(self, event: TruckTelemetryEvent) -> List[WindowedAggregateResult]:
+        """
+        Filter T>0, delegate to process_telemetry, return emitted list.
+        Used by consumers; process_telemetry remains for watermark-aware callers.
+        """
+        # Pipeline Filter: temperature > 0 (spec §8)
+        if event.temperature <= 0:
+            # filtered — do not count as late, do not advance watermark
+            return []
+        _, emitted = self.process_telemetry(event)
+        return emitted

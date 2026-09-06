@@ -1,0 +1,53 @@
+# 20 real worker containers — each is a Kafka consumer group member
+# Usage: docker compose -f infra/docker-compose.workers.yml up --scale worker=20 -d
+# Requires kafka running (infra/kafka/docker-compose.yml)
+services:
+  worker:
+    build:
+      context: ..
+      dockerfile: infra/worker/Dockerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: fleet-telemetry
+      KAFKA_CHANGELOG_TOPIC: streamforge.truck_state.changelog
+      KAFKA_CONSUMER_GROUP: streamforge-workers
+      STORAGE_MODE: production
+      ROCKSDB_BASE_PATH: /data/rocksdb
+      WINDOW_SIZE_MS: 300000
+      MAX_LATENESS_MS: 15000
+      LOG_LEVEL: INFO
+    depends_on:
+      kafka:
+        condition: service_healthy
+    # No shared RocksDB volume — each worker has ephemeral state
+    # Recovery is via Kafka changelog replay, not shared files.
+    # See docs/STATE_CHANGELOG_PROTOCOL.md recovery model:
+    #   A owns P -> A persists changelog -> A dies -> B assigned P -> B replays changelog
+    # Shared volume would allow concurrent mutation during rebalance — avoided.
+    tmpfs:
+      - /data/rocksdb
+
+  # Kafka must be included when using this file standalone
+  kafka:
+    image: apache/kafka:3.7.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 | grep -q ApiVersion"]
+      interval: 5s
+      retries: 20
+      start_period: 15s
+
+# No named volumes — ephemeral tmpfs per worker (see above)

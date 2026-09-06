@@ -9,20 +9,31 @@ import { MetricsDashboard } from './components/MetricsDashboard';
 import { CodebaseExplorer } from './components/CodebaseExplorer';
 import { Member1Handbook } from './components/Member1Handbook';
 import { streamSimulation } from './engine/simulationEngine';
+import { IS_DEMO } from './lib/api';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('topology');
 
   useEffect(() => {
-    // Start distributed streaming simulation loop on mount
-    streamSimulation.startSimulation();
-    return () => {
-      streamSimulation.stopSimulation();
-    };
+    // DEMO mode only: simulation provides fake data. Live mode uses FastAPI/WebSocket.
+    if (IS_DEMO) {
+      streamSimulation.startSimulation();
+      return () => streamSimulation.stopSimulation();
+    }
   }, []);
 
   return (
     <div className="min-h-screen bg-[#05070a] text-slate-200 flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
+      {IS_DEMO && (
+        <div className="bg-amber-500 text-slate-950 text-xs font-bold text-center py-1 tracking-widest">
+          DEMO MODE — Simulated data (simulationEngine.ts) — append ?demo to URL or set VITE_DEMO_MODE=true — Live mode requires FastAPI at {import.meta.env.VITE_API_URL || "http://localhost:8000"}
+        </div>
+      )}
+      {!IS_DEMO && (
+        <div className="bg-emerald-500/20 border-b border-emerald-500/30 text-emerald-300 text-xs font-mono text-center py-1">
+          LIVE MODE — Fetching from FastAPI/WebSocket — fallback to DEMO if API unreachable
+        </div>
+      )}
       {/* Top Navigation & Metrics Bar */}
       <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
 

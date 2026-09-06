@@ -18,7 +18,7 @@ import time
 import random
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Dict, List
+from typing import Any, Dict, List
 
 # Ensure local streamforge package is accessible
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -89,37 +89,43 @@ def run_benchmark(fleet_size: int, partitions: int, total_events: int = 100_000)
     store = RocksDBStateStore(db_path="/tmp/streamforge_benchmark_rocksdb", partition_id=0)
     exporter = PrometheusMetricsExporter(service_name="streamforge_benchmark")
 
-    batch_size = 10_000
-    batches = total_events // batch_size
+    batch_size = min(10_000, max(1, total_events))
+    batches = max(1, (total_events + batch_size - 1) // batch_size)
     latencies_ms: List[float] = []
 
     start_wall_time = time.time()
     total_processed = 0
 
     for b in range(batches):
-        batch = producer.stream_batch(batch_size=batch_size)
+        events_this_batch = min(batch_size, total_events - total_processed)
+        if events_this_batch <= 0:
+            break
+        batch = producer.stream_batch(batch_size=events_this_batch)
         t0 = time.perf_counter()
 
         for evt in batch:
             results = processor.process_event(evt)
             if results:
                 for res in results:
-                    store.put(f"{res.truck_id}:{res.window_start}", res.dict())
+                    dump = res.model_dump() if hasattr(res, "model_dump") else res.dict()
+                    store.put(f"{res.truck_id}:{res.window_start}", dump)
                     exporter.counters["streamforge_windows_emitted_total"] += 1
 
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        per_event_lat = elapsed_ms / batch_size
+        per_event_lat = elapsed_ms / max(1, events_this_batch)
         latencies_ms.extend([per_event_lat] * 10)  # sample
 
-        total_processed += batch_size
-        exporter.record_event_processed(batch_size)
+        total_processed += events_this_batch
+        exporter.record_event_processed(events_this_batch)
 
-        pct = int(((b + 1) / batches) * 100)
-        current_rate = total_processed / (time.time() - start_wall_time)
+        pct = int((total_processed / total_events) * 100)
+        current_rate = total_processed / max(0.0001, (time.time() - start_wall_time))
         print(f"  Progress: {pct:3d}% | Processed: {total_processed:,}/{total_events:,} | Rate: {current_rate:,.0f} evt/s", end="\r")
 
-    total_time = time.time() - start_wall_time
+    total_time = max(0.0001, time.time() - start_wall_time)
     avg_throughput = total_processed / total_time
+    if not latencies_ms:
+        latencies_ms = [0.0]
     latencies_ms.sort()
     p50 = latencies_ms[int(len(latencies_ms) * 0.50)]
     p95 = latencies_ms[int(len(latencies_ms) * 0.95)]
@@ -139,6 +145,20 @@ def run_benchmark(fleet_size: int, partitions: int, total_events: int = 100_000)
     store.close()
 
 
+def _get_alloc_map(rebalancer: Any) -> Dict[str, List[int]]:
+    """Safe helper to get worker -> partitions mapping across all rebalancer versions."""
+    if hasattr(rebalancer, "get_allocation") and callable(rebalancer.get_allocation):
+        return rebalancer.get_allocation()
+    # Fallback to direct inspection of assignments and active_workers
+    workers = getattr(rebalancer, "active_workers", {})
+    worker_keys = workers.keys() if isinstance(workers, dict) else list(workers)
+    res: Dict[str, List[int]] = {w: [] for w in worker_keys}
+    for p_id, w_id in getattr(rebalancer, "assignments", {}).items():
+        if w_id in res:
+            res[w_id].append(p_id)
+    return res
+
+
 def run_chaos_demo() -> None:
     """Demonstrates live worker crash, partition rebalance, and changelog recovery."""
     print("=" * 75)
@@ -153,7 +173,7 @@ def run_chaos_demo() -> None:
         rebalancer.register_worker(f"worker-{i:02d}")
 
     rebalancer.rebalance()
-    initial_alloc = rebalancer.get_allocation()
+    initial_alloc = _get_alloc_map(rebalancer)
     print("\n[STEP 1] Initial Partition Allocation across 4 Workers:")
     for w, parts in sorted(initial_alloc.items()):
         print(f"  • {w}: {len(parts)} partitions -> {parts[:6]}...")
@@ -180,7 +200,7 @@ def run_chaos_demo() -> None:
 
     # Rebalance to remaining workers
     rebalancer.rebalance()
-    new_alloc = rebalancer.get_allocation()
+    new_alloc = _get_alloc_map(rebalancer)
     
     # Find which worker inherited partition 5
     new_owner = None
@@ -245,7 +265,6 @@ def run_live(fleet_size: int, partitions: int, workers: int, metrics_port: int) 
         while True:
             step += 1
             batch = producer.stream_batch(batch_size=500)
-            t0 = time.perf_counter()
 
             for evt in batch:
                 worker_id = f"worker-{(evt.partition % workers) + 1:02d}"
@@ -254,7 +273,8 @@ def run_live(fleet_size: int, partitions: int, workers: int, metrics_port: int) 
                 if results:
                     for res in results:
                         store = state_stores[worker_id]
-                        store.put(f"{res.truck_id}:{res.window_start}", res.dict())
+                        dump = res.model_dump() if hasattr(res, "model_dump") else res.dict()
+                        store.put(f"{res.truck_id}:{res.window_start}", dump)
                         exporter.counters["streamforge_windows_emitted_total"] += 1
 
                 if evt.temperature > 0.0:
@@ -303,7 +323,6 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "test":
-        # Run test suite
         import tests.test_stream_engine as t
         t_classes = [t.TestRollingAverageMath, t.TestWindowingAndWatermarks, t.TestRocksDBStateAndChaosRecovery]
         passed, failed = 0, 0
