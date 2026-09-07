@@ -120,7 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
     <header className="sticky top-0 z-50 bg-[#0b0f17]/95 backdrop-blur-md border-b border-[#1e293b] text-slate-100 shadow-xl">
       {/* Main Header Bar */}
       <div className="max-w-7xl mx-auto px-4 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-4 bg-[#111827] border border-[#1e293b] rounded-2xl px-5 py-3 shadow-lg">
+        <div className="panel-surface flex flex-wrap items-center justify-between gap-4 bg-[#111827] border border-[#1e293b] rounded-2xl px-5 py-3 shadow-lg">
           {/* Brand */}
           <div className="flex items-center gap-3.5">
             <div className="w-10 h-10 bg-orange-500 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(249,115,22,0.4)] shrink-0">
@@ -273,7 +273,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-xl transition whitespace-nowrap ${
+                className={`tab-button flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-xl transition whitespace-nowrap ${
                   isActive
                     ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40 shadow-[0_0_12px_rgba(249,115,22,0.25)]'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-[#16202e]'

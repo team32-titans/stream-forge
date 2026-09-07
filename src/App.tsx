@@ -23,12 +23,16 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0a0c10] text-slate-100 flex flex-col antialiased selection:bg-orange-500 selection:text-white">
+    <div className="app-shell min-h-screen bg-[#0a0c10] text-slate-100 flex flex-col antialiased selection:bg-orange-500 selection:text-white">
+      <div className="app-glow app-glow-1" />
+      <div className="app-glow app-glow-2" />
+      <div className="app-grid" />
+
       {/* Top Navigation & Metrics Bar */}
       <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
 
       {/* Main Interactive Workspace Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4">
+      <main className="app-main flex-1 max-w-7xl w-full mx-auto px-4 py-4 relative z-10">
         {activeTab === 'topology' && <TopologyView />}
         {activeTab === 'chaos' && <ChaosStudio />}
         {activeTab === 'aimodel' && <AIModelLab />}
@@ -41,7 +45,7 @@ export default function App() {
       </main>
 
       {/* Bento Grid Footer */}
-      <footer className="border-t border-[#1e293b] bg-[#111827] text-slate-400 text-[10px] py-4 px-4 font-mono uppercase tracking-widest">
+      <footer className="panel-surface border-t border-[#1e293b] bg-[#111827]/90 text-slate-400 text-[10px] py-4 px-4 font-mono uppercase tracking-widest relative z-10">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <span className="font-bold text-white">Cluster ID: SF-PRD-EUS-01</span>
