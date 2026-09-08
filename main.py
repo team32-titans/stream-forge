@@ -11,8 +11,9 @@ Usage:
   python3 main.py --mode=test
 """
 
-import argparse
+
 import os
+import argparse
 import sys
 import time
 import random
