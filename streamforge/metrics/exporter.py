@@ -44,18 +44,25 @@ class PrometheusMetricsExporter:
         }
         self._hist = None
         if _PROM_AVAILABLE:
+            # Avoid duplicate registry error on re-import (pytest)
+            def _get_or_create(metric_cls, name, doc, labels, **kw):
+                if name in REGISTRY._names_to_collectors:
+                    return REGISTRY._names_to_collectors[name]
+                return metric_cls(name, doc, labels, **kw)
+
             try:
-                # Reuse or create
-                self._c_processed = Counter("streamforge_events_processed_total", "Total events processed", ["service"])
-                self._c_failed = Counter("streamforge_events_failed_total", "Failed events", ["service"])
-                self._g_throughput = Gauge("streamforge_events_per_second", "Throughput", ["service"])
-                self._g_lag = Gauge("streamforge_consumer_lag", "Consumer lag", ["service"])
-                self._g_worker_up = Gauge("streamforge_worker_up", "Worker up", ["service"])
-                self._g_p99 = Gauge("streamforge_p99_latency_ms", "p99 latency ms", ["service"])
-                self._hist = Histogram("streamforge_processing_latency_seconds", "Processing latency", ["service"], buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1])
-            except Exception:
-                # Already registered
-                pass
+                self._c_processed = _get_or_create(Counter, "streamforge_events_processed_total", "Total events processed", ["service"])
+                self._c_failed = _get_or_create(Counter, "streamforge_events_failed_total", "Failed events", ["service"])
+                self._g_throughput = _get_or_create(Gauge, "streamforge_events_per_second", "Throughput", ["service"])
+                self._g_lag = _get_or_create(Gauge, "streamforge_consumer_lag", "Consumer lag", ["service"])
+                self._g_worker_up = _get_or_create(Gauge, "streamforge_worker_up", "Worker up", ["service"])
+                self._g_p99 = _get_or_create(Gauge, "streamforge_p99_latency_ms", "p99 latency ms", ["service"])
+                self._hist = _get_or_create(Histogram, "streamforge_processing_latency_seconds", "Processing latency", ["service"], buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1])
+            except Exception as e:
+                # Fallback to dict-only if registry creation fails
+                import logging
+
+                logging.getLogger("streamforge.metrics").warning(f"Prometheus registry init failed: {e}")
 
     def record_event_processed(self, count: int = 1) -> None:
         self.counters["streamforge_events_processed_total"] += count
