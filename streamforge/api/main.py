@@ -157,7 +157,10 @@ def windows(truck_id: str):
         return {"truck_id": truck_id, "windows": [], "note": "no RocksDB data on API host (workers hold state)"}
     from streamforge.state.rocksdb_store import RocksDBStateStore
 
-    for pid in range(min(s.kafka_partitions, 8)):  # limit scan for latency
+    limit_total = 200
+    for pid in range(s.kafka_partitions):
+        if len(results) >= limit_total:
+            break
         db_path = os.path.join(base, f"p{pid:02d}")
         if not os.path.isdir(db_path):
             continue
@@ -165,10 +168,12 @@ def windows(truck_id: str):
             store = RocksDBStateStore(db_path=db_path, partition_id=pid, storage_mode=s.storage_mode)
             for k, v in store.scan(prefix=f"{truck_id}:"):
                 results.append({"partition": pid, "key": k, "value": v})
+                if len(results) >= limit_total:
+                    break
             store.close()
         except Exception:
             continue
-    return {"truck_id": truck_id, "windows": results}
+    return {"truck_id": truck_id, "windows": results, "count": len(results), "limit": limit_total}
 
 
 @app.get("/api/state/{partition}")

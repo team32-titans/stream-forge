@@ -1,12 +1,12 @@
 """
-StreamForge Partition Rebalancing & Fault Recovery Coordinator
-==============================================================
-Module: streamforge.recovery.rebalancer
-Author: Member 1 (Stream Processing & Stateful Engine)
+StreamForge Partition Rebalancing — DEMO/SIMULATION ONLY
+=========================================================
+Production workers use Kafka's cooperative-sticky consumer group (see
+streamforge/workers/consumer.py). This module is kept for unit-test
+illustration of rebalancing logic and the WindowingLab/ChaosStudio demo.
+It is NOT used in the production worker path.
 
-Orchestrates automatic partition rebalancing when worker nodes fail or scale out.
-Ensures zero-data-loss failover from failed nodes (e.g. Worker #4) to standby nodes
-(e.g. Worker #5) via transactional RocksDB changelog restoration.
+DEPRECATION: New code should rely on Kafka group coordination, not this class.
 """
 
 import logging
@@ -30,8 +30,9 @@ class PartitionAssignment:
 
 class CooperativeStickyRebalancer:
     """
-    Industrial Cooperative Sticky Partition Assignor.
-    Minimizes partition movement during rebalances and preserves local RocksDB caches.
+    DEMO cooperative-sticky simulator (see module docstring).
+    Production: Kafka's partition.assignment.strategy=cooperative-sticky in
+    streamforge/workers/consumer.py. This class mimics sticky logic for tests/demo.
     """
 
     def __init__(

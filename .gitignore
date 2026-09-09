@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+rocksdb_data/
+*.db
