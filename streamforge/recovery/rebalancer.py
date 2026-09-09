@@ -11,8 +11,9 @@ DEPRECATION: New code should rely on Kafka group coordination, not this class.
 
 import logging
 import time
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from streamforge.state.changelog_manager import ChangelogManager
+
 from streamforge.state.rocksdb_store import RocksDBStateStore
 
 logger = logging.getLogger("streamforge.rebalancer")
@@ -92,22 +93,55 @@ class CooperativeStickyRebalancer:
     def rebalance(self) -> Dict[int, str]:
         """
         Evenly distribute total partitions across all healthy active workers.
-        Sticky: Leaves existing valid assignments untouched to preserve local RocksDB cache.
+        Cooperative Sticky: Leaves valid assignments untouched while balancing
+        excess partitions to minimize cache invalidation.
         """
         if not self.active_workers:
+            self.assignments.clear()
             return {}
 
         worker_ids = sorted(list(self.active_workers.keys()))
         num_workers = len(worker_ids)
+        target_per_worker = self.total_partitions // num_workers
+        remainder = self.total_partitions % num_workers
+
+        # Remove assignments for dead workers
+        for p_id, w_id in list(self.assignments.items()):
+            if w_id not in self.active_workers:
+                del self.assignments[p_id]
+
+        # Track current partition ownership per worker
+        worker_counts: Dict[str, List[int]] = {w: [] for w in worker_ids}
+        unassigned: List[int] = []
 
         for p_id in range(self.total_partitions):
-            # Sticky check: If current worker is still healthy, keep it
-            current_worker = self.assignments.get(p_id)
-            if current_worker in self.active_workers:
-                continue
+            w_id = self.assignments.get(p_id)
+            if w_id in worker_counts:
+                worker_counts[w_id].append(p_id)
+            else:
+                unassigned.append(p_id)
 
-            # Assign to worker based on partition hash
-            assigned_worker = worker_ids[p_id % num_workers]
-            self.assignments[p_id] = assigned_worker
+        # Relieve overloaded workers down to fair share
+        for idx, w_id in enumerate(worker_ids):
+            max_allowed = target_per_worker + (1 if idx < remainder else 0)
+            while len(worker_counts[w_id]) > max_allowed:
+                revoked_pid = worker_counts[w_id].pop()
+                del self.assignments[revoked_pid]
+                unassigned.append(revoked_pid)
+
+        # Reassign unassigned partitions to least-loaded workers
+        for p_id in sorted(unassigned):
+            target_worker = min(worker_ids, key=lambda w: len(worker_counts[w]))
+            self.assignments[p_id] = target_worker
+            worker_counts[target_worker].append(p_id)
 
         return self.assignments
+
+    def get_allocation(self) -> Dict[str, List[int]]:
+        """Returns mapping of worker_id -> list of assigned partition IDs."""
+        alloc: Dict[str, List[int]] = {w: [] for w in self.active_workers}
+        for pid, wid in self.assignments.items():
+            if wid in alloc:
+                alloc[wid].append(pid)
+        return alloc
+

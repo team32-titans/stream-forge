@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { TopologyView } from './components/TopologyView';
 import { ChaosStudio } from './components/ChaosStudio';
+import { AIModelLab } from './components/AIModelLab';
 import { WindowingLab } from './components/WindowingLab';
 import { RocksDBInspector } from './components/RocksDBInspector';
 import { FleetMonitor } from './components/FleetMonitor';
@@ -9,38 +10,32 @@ import { MetricsDashboard } from './components/MetricsDashboard';
 import { CodebaseExplorer } from './components/CodebaseExplorer';
 import { Member1Handbook } from './components/Member1Handbook';
 import { streamSimulation } from './engine/simulationEngine';
-import { IS_DEMO } from './lib/api';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('topology');
 
   useEffect(() => {
-    // DEMO mode only: simulation provides fake data. Live mode uses FastAPI/WebSocket.
-    if (IS_DEMO) {
-      streamSimulation.startSimulation();
-      return () => streamSimulation.stopSimulation();
-    }
+    // Start distributed streaming simulation loop on mount
+    streamSimulation.startSimulation();
+    return () => {
+      streamSimulation.stopSimulation();
+    };
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#05070a] text-slate-200 flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
-      {IS_DEMO && (
-        <div className="bg-amber-500 text-slate-950 text-xs font-bold text-center py-1 tracking-widest">
-          DEMO MODE — Simulated data (simulationEngine.ts) — append ?demo to URL or set VITE_DEMO_MODE=true — Live mode requires FastAPI at {import.meta.env.VITE_API_URL || "http://localhost:8000"}
-        </div>
-      )}
-      {!IS_DEMO && (
-        <div className="bg-emerald-500/20 border-b border-emerald-500/30 text-emerald-300 text-xs font-mono text-center py-1">
-          LIVE MODE — Fetching from FastAPI/WebSocket — fallback to DEMO if API unreachable
-        </div>
-      )}
+    <div className="app-shell min-h-screen bg-[#0a0c10] text-slate-100 flex flex-col antialiased selection:bg-orange-500 selection:text-white">
+      <div className="app-glow app-glow-1" />
+      <div className="app-glow app-glow-2" />
+      <div className="app-grid" />
+
       {/* Top Navigation & Metrics Bar */}
       <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
 
       {/* Main Interactive Workspace Content */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4">
+      <main className="app-main flex-1 max-w-7xl w-full mx-auto px-4 py-4 relative z-10">
         {activeTab === 'topology' && <TopologyView />}
         {activeTab === 'chaos' && <ChaosStudio />}
+        {activeTab === 'aimodel' && <AIModelLab />}
         {activeTab === 'windowing' && <WindowingLab />}
         {activeTab === 'rocksdb' && <RocksDBInspector />}
         {activeTab === 'fleet' && <FleetMonitor />}
@@ -50,17 +45,17 @@ export default function App() {
       </main>
 
       {/* Bento Grid Footer */}
-      <footer className="border-t border-slate-800/80 bg-[#05070a] text-slate-500 text-[10px] py-4 px-4 font-mono uppercase tracking-widest">
+      <footer className="panel-surface border-t border-[#1e293b] bg-[#111827]/90 text-slate-400 text-[10px] py-4 px-4 font-mono uppercase tracking-widest relative z-10">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <span className="font-bold text-slate-300">Cluster ID: SF-PRD-EUS-01</span>
-            <span className="text-slate-700">•</span>
+            <span className="font-bold text-white">Cluster ID: SF-PRD-EUS-01</span>
+            <span className="text-slate-600">•</span>
             <span className="text-orange-400 font-semibold">Distributed Stateful Engine</span>
           </div>
           <div className="flex items-center gap-4 text-slate-400">
             <span>Uptime: 14d 02h 11m 45s</span>
-            <span className="text-slate-700">•</span>
-            <span>Kafka Offsets: [442,109,223 | 442,110,001]</span>
+            <span className="text-slate-600">•</span>
+            <span className="text-slate-300">Kafka Offsets: [442,109,223 | 442,110,001]</span>
           </div>
         </div>
       </footer>
