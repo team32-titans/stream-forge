@@ -8,6 +8,7 @@ setup(
         "pydantic>=2.0.0",
         "prometheus-client>=0.19.0",
     ],
+
     entry_points={
         "console_scripts": [
             "streamforge=main:main",
