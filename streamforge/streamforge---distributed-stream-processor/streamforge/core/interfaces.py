@@ -29,39 +29,100 @@ from typing import (
 try:
     from pydantic import BaseModel, Field, field_validator
 except ImportError:
-    # Fallback to standard library implementation when pydantic is not installed
+    # Robust standard library fallback implementation when pydantic is not installed
+    class _FieldInfo:
+        def __init__(self, default=..., default_factory=None, description=None, **kwargs):
+            self.default = default
+            self.default_factory = default_factory
+            self.description = description
+            self.extra = kwargs
+
+    def Field(default=..., default_factory=None, description=None, **kwargs):
+        return _FieldInfo(default=default, default_factory=default_factory, description=description, **kwargs)
+
+    def field_validator(*field_names, **kwargs):
+        def decorator(fn):
+            target = getattr(fn, "__func__", fn)
+            try:
+                target.__field_validator_fields__ = field_names
+            except AttributeError:
+                pass
+            try:
+                fn.__field_validator_fields__ = field_names
+            except AttributeError:
+                pass
+            return fn
+        return decorator
+
     class BaseModel:
         def __init__(self, **kwargs):
-            for k, v in self.__class__.__dict__.items():
-                if not k.startswith("_") and not callable(v):
-                    setattr(self, k, v)
+            cls = self.__class__
+            annotations = getattr(cls, "__annotations__", {})
+
+            for field_name in annotations:
+                if field_name.startswith("_"):
+                    continue
+                class_attr = cls.__dict__.get(field_name, ...)
+                if field_name in kwargs:
+                    val = kwargs[field_name]
+                elif isinstance(class_attr, _FieldInfo):
+                    if class_attr.default_factory is not None:
+                        val = class_attr.default_factory()
+                    elif class_attr.default is not ...:
+                        val = class_attr.default
+                    else:
+                        raise ValueError(f"Field '{field_name}' is required for {cls.__name__}")
+                elif class_attr is not ...:
+                    val = class_attr
+                else:
+                    raise ValueError(f"Field '{field_name}' is required for {cls.__name__}")
+                setattr(self, field_name, val)
+
             for k, v in kwargs.items():
-                setattr(self, k, v)
+                if k not in annotations and not k.startswith("_"):
+                    setattr(self, k, v)
+
+            for attr_name, class_val in cls.__dict__.items():
+                raw_func = getattr(class_val, "__func__", class_val)
+                validator_fields = (
+                    getattr(class_val, "__field_validator_fields__", None)
+                    or getattr(raw_func, "__field_validator_fields__", None)
+                )
+                if validator_fields:
+                    for target_field in validator_fields:
+                        if hasattr(self, target_field):
+                            curr_val = getattr(self, target_field)
+                            if isinstance(class_val, classmethod) or (
+                                hasattr(raw_func, "__code__")
+                                and raw_func.__code__.co_varnames
+                                and raw_func.__code__.co_varnames[0] == "cls"
+                            ):
+                                validated = raw_func(cls, curr_val)
+                            else:
+                                validated = raw_func(self, curr_val)
+                            setattr(self, target_field, validated)
 
         def model_dump(self) -> Dict[str, Any]:
             res = {}
             for k, v in self.__dict__.items():
-                if not k.startswith("_"):
-                    res[k] = v.value if hasattr(v, "value") else v
+                if k.startswith("_") or callable(v) or isinstance(v, (classmethod, staticmethod)):
+                    continue
+                if hasattr(v, "value"):
+                    res[k] = v.value
+                elif hasattr(v, "model_dump"):
+                    res[k] = v.model_dump()
+                elif hasattr(v, "dict"):
+                    res[k] = v.dict()
+                else:
+                    res[k] = v
             return res
 
         def dict(self) -> Dict[str, Any]:
             return self.model_dump()
 
         def __repr__(self) -> str:
-            return f"{self.__class__.__name__}({self.model_dump()})"
-
-    def Field(default=..., default_factory=None, **kwargs):
-        if default_factory is not None:
-            return default_factory()
-        if default is ...:
-            return None
-        return default
-
-    def field_validator(*args, **kwargs):
-        def decorator(fn):
-            return fn
-        return decorator
+            fields_str = ", ".join(f"{k}={v!r}" for k, v in self.model_dump().items())
+            return f"{self.__class__.__name__}({fields_str})"
 
 
 

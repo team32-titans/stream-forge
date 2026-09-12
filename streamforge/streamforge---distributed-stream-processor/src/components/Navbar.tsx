@@ -12,6 +12,7 @@ import {
   Database,
   Gauge,
   Layers,
+  Moon,
   Pause,
   Play,
   Radio,
@@ -19,6 +20,7 @@ import {
   Server,
   ShieldAlert,
   Sparkles,
+  Sun,
   Zap,
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
@@ -37,6 +39,24 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const [streamMode, setStreamMode] = useState<'live' | 'demo'>('live');
   const [apiLatency, setApiLatency] = useState<number>(streamApi.getLatency());
   const [connStatus, setConnStatus] = useState<ConnectionStatus>(streamSimulation.connectionStatus);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('sf_theme') as 'dark' | 'light') || 'dark';
+    }
+    return 'dark';
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    if (theme === 'light') {
+      document.documentElement.classList.add('theme-light');
+      document.documentElement.classList.remove('theme-dark');
+    } else {
+      document.documentElement.classList.add('theme-dark');
+      document.documentElement.classList.remove('theme-light');
+    }
+    localStorage.setItem('sf_theme', theme);
+  }, [theme]);
 
   useEffect(() => {
     const unsubSim = streamSimulation.subscribe(() => {
@@ -233,7 +253,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             {/* Play / Pause Toggle */}
             <button
               onClick={handleToggle}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-md transition ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-md transition cursor-pointer ${
                 isRunning
                   ? 'bg-[#16202e] hover:bg-[#1e2a3c] text-amber-300 border border-[#223348]'
                   : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-[0_0_12px_rgba(16,185,129,0.4)]'
@@ -249,6 +269,34 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                 </>
               )}
             </button>
+
+            {/* Professional Theme Switcher (Obsidian Black vs Clean White) */}
+            <div className="flex items-center bg-[#16202e] p-0.5 rounded-xl border border-[#223348]" title="Switch Theme">
+              <button
+                onClick={() => setTheme('dark')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  theme === 'dark'
+                    ? 'bg-[#0b0f17] text-orange-400 border border-[#223348] shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Obsidian Black Industrial Theme"
+              >
+                <Moon className="w-3.5 h-3.5 text-orange-400" />
+                <span className="hidden sm:inline text-[11px]">Black</span>
+              </button>
+              <button
+                onClick={() => setTheme('light')}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  theme === 'light'
+                    ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+                title="Enterprise Clean White Theme"
+              >
+                <Sun className="w-3.5 h-3.5 text-amber-500" />
+                <span className="hidden sm:inline text-[11px]">White</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
