@@ -119,15 +119,16 @@ def partitions():
 
 @app.get("/api/telemetry")
 def telemetry(limit: int = 20):
-    # Best-effort: consume last N from Kafka (if available)
+    # Best-effort: short-lived consumer per request (no pooling; closed in finally).
     s = get_settings()
+    limit = max(1, min(100, limit))
     events: List[Dict[str, Any]] = []
+    c = None
     try:
-        from confluent_kafka import Consumer, TopicPartition, OFFSET_END
+        from confluent_kafka import Consumer
 
         conf = {"bootstrap.servers": s.kafka_bootstrap_servers, "group.id": "api-telemetry-reader", "auto.offset.reset": "latest", "enable.auto.commit": False}
         c = Consumer(conf)
-        # Quick poll without assignment returns nothing if no recent — just return empty
         c.subscribe([s.kafka_topic])
         for _ in range(limit):
             msg = c.poll(0.5)
@@ -139,9 +140,14 @@ def telemetry(limit: int = 20):
                 continue
             if len(events) >= limit:
                 break
-        c.close()
     except Exception as e:
         return {"events": [], "warning": str(e), "limit": limit}
+    finally:
+        try:
+            if c is not None:
+                c.close()
+        except Exception:
+            pass
     return {"events": events, "count": len(events)}
 
 
@@ -245,10 +251,17 @@ async def ws_metrics(ws: WebSocket):
                 "counters": exporter.counters,
                 "gauges": exporter.gauges,
             }
-            await ws.send_text(json.dumps(payload))
+            # Backpressure guard: drop this tick for slow clients instead of
+            # queueing unbounded messages in memory.
+            try:
+                await asyncio.wait_for(ws.send_text(json.dumps(payload)), timeout=2)
+            except (asyncio.TimeoutError, RuntimeError):
+                break
             await asyncio.sleep(1)
             # Also wait for client ping
     except WebSocketDisconnect:
+        pass
+    except Exception:
         pass
     finally:
         if ws in connected:

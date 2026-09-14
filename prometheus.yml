@@ -3,6 +3,11 @@ global:
   evaluation_interval: 2s
 
 scrape_configs:
-  - job_name: 'streamforge'
+  # Port 9102 = legacy main.py HTTP daemon (docker-compose.yml).
+  # FastAPI control plane (streamforge.api.main) exposes /metrics on :8000.
+  - job_name: 'streamforge-engine'
     static_configs:
       - targets: ['streamforge-engine:9102']
+  - job_name: 'streamforge-fastapi'
+    static_configs:
+      - targets: ['host.docker.internal:8000']

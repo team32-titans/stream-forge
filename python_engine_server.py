@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-StreamForge - FastAPI/ASGI Compatible Python Engine Server
-==========================================================
-Runs on internal port 8000. Proxied through Node.js Express server on port 3000.
+StreamForge - Python Engine HTTP Bridge (stdlib, FastAPI-compatible routes)
+===========================================================================
+Runs on internal port 9102. Proxied through Node.js Express server on port 3000.
 Exposes REST endpoints and telemetry generator for 50,000 IoT refrigerated fleet.
+Route shapes mirror streamforge.api.main (FastAPI on :8000) so the Express
+reverse-proxy (/api/py/* -> :9102) stays compatible.
 """
 
 import os
@@ -38,28 +40,32 @@ REBALANCER.rebalance()
 
 ENGINE_STATE = {
     "status": "ONLINE",
-    "framework": "FastAPI/ASGI Python Engine",
+    # Initial counters are zero; background loop computes live throughput.
+    "framework": "Python Engine HTTP Bridge (FastAPI-compatible routes)",
     "python_version": sys.version.split()[0],
     "port": PORT,
     "fleet_size": 50000,
     "partitions": 32,
     "workers": 20,
     "healthy_workers": 20,
-    "events_processed": 5120400,
-    "throughput": 24800.0,
-    "anomalies_detected": 42,
+    "events_processed": 0,
+    "throughput": 0.0,
+    "anomalies_detected": 0,
     "uptime_start": time.time(),
     "last_batch": [],
 }
 
 def background_stream_loop():
     """Continuously generates events and updates engine state."""
+    loop_start = time.time()
     while True:
         try:
             batch = TELEMETRY_GEN.stream_batch(batch_size=50)
             ENGINE_STATE["events_processed"] += len(batch)
             anomalies = sum(1 for e in batch if e.temperature > 0.0)
             ENGINE_STATE["anomalies_detected"] += anomalies
+            elapsed = max(0.001, time.time() - loop_start)
+            ENGINE_STATE["throughput"] = round(ENGINE_STATE["events_processed"] / elapsed, 1)
             
             ENGINE_STATE["last_batch"] = [
                 {
