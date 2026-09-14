@@ -52,10 +52,20 @@ class RocksDBStateStore(StateStore[str, Dict[str, Any]]):
         db_path: str,
         partition_id: int,
         options: Optional[RocksDBOptions] = None,
+        storage_mode: str = "demo",
     ) -> None:
         self.db_path = db_path
         self.partition_id = partition_id
         self.options = options or RocksDBOptions()
+        self.storage_mode = storage_mode
+        if storage_mode == "production":
+            try:
+                import rocksdict  # noqa: F401
+            except Exception as e:
+                raise RuntimeError(
+                    "STORAGE_MODE=production requires rocksdict installed (Linux/Docker worker). "
+                    f"Original error: {e}"
+                )
         
         # Internal in-memory emulation layer for environments without C++ rocksdb binary
         self._memtable: Dict[str, str] = {}
@@ -114,13 +124,20 @@ class RocksDBStateStore(StateStore[str, Dict[str, Any]]):
         self._wal_sequence += 1
         self._memtable[key] = serialized
 
-        # Check if Memtable needs to be flushed to SSTable L0
-        if len(self._memtable) >= 500:
+        # Flush based on configured write-buffer byte size (approx via serialized bytes).
+        try:
+            mem_bytes = sum(len(v.encode("utf-8")) for v in self._memtable.values())
+        except Exception:
+            mem_bytes = len(self._memtable) * 140
+        if mem_bytes >= self.options.write_buffer_size:
             self._flush_memtable()
 
     def delete(self, key: str) -> None:
         """Write a tombstone marker for the key."""
-        self.put(key, {"__DELETED__": True})
+        if not self._is_open:
+            raise RuntimeError("Cannot write to closed RocksDB store.")
+        self._wal_sequence += 1
+        self._memtable[key] = "__DELETED__"
 
     def _flush_memtable(self) -> None:
         """Flush active MemTable to Level 0 SSTable and reset buffer."""
@@ -153,6 +170,30 @@ class RocksDBStateStore(StateStore[str, Dict[str, Any]]):
             
         logger.info(f"Created RocksDB checkpoint for partition {self.partition_id} at {checkpoint_path}")
         return checkpoint_path
+
+    def scan(self, prefix: str = "") -> Iterator[Tuple[str, Dict[str, Any]]]:
+        """Iterate live (non-tombstoned) entries matching prefix, newest-write-wins."""
+        if not self._is_open:
+            raise RuntimeError("Cannot scan closed RocksDB store.")
+        merged: Dict[str, str] = {}
+        for level_table in self._sstable_layers:
+            merged.update(level_table)
+        for imm in self._immutable_memtables:
+            merged.update(imm)
+        merged.update(self._memtable)
+        for k in sorted(merged.keys()):
+            if prefix and not k.startswith(prefix):
+                continue
+            raw = merged[k]
+            if raw == "__DELETED__":
+                continue
+            try:
+                val = json.loads(raw)
+            except Exception:
+                continue
+            if isinstance(val, dict) and val.get("__DELETED__") is True:
+                continue
+            yield k, val
 
     def estimate_keys(self) -> int:
         """Estimate total distinct active keys across MemTable and SSTables."""
