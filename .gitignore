@@ -13,3 +13,6 @@ __pycache__/
 data/
 rocksdb_data/
 *.db
+# Stale duplicate project copies (not part of build / find_packages)
+s1/
+streamforge---distributed-stream-processor/
