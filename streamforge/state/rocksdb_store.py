@@ -6,15 +6,26 @@ Author: Member 1 (Stream Processing & Stateful Engine)
 
 Provides a production-grade wrapper around RocksDB (LSM-Tree Key-Value Store)
 for sub-millisecond local state reads/writes during windowed streaming operations.
-Includes automated checkpointing, cache sizing, and WAL synchronization.
+
+Includes:
+- In-memory MemTable
+- Immutable MemTables
+- SSTable-style storage layers
+- Write-Ahead Log sequence tracking
+- Tombstone-based deletion
+- Prefix scanning
+- Key estimation
+- Automated checkpointing
+- Safe shutdown
 """
 
 import json
 import logging
 import os
-import shutil
 from typing import Any, Dict, Iterator, Optional, Tuple
+
 from streamforge.core.interfaces import StateStore
+
 
 logger = logging.getLogger("streamforge.state.rocksdb")
 
@@ -24,14 +35,15 @@ class RocksDBOptions:
     Performance tuning parameters for high-throughput stream processing.
     Optimized for 100k events/sec with fast random writes.
     """
+
     def __init__(
         self,
-        write_buffer_size_mb: int = 64,      # 64MB MemTable size
-        max_write_buffer_number: int = 4,    # Up to 4 MemTables in RAM
-        max_background_compactions: int = 4, # Parallel compaction threads
-        block_cache_size_mb: int = 256,      # 256MB LRU Block Cache
-        enable_wal: bool = True,             # Ensure zero data loss on crash
-        sync_wal: bool = False,              # Group commit for max IOPS
+        write_buffer_size_mb: int = 64,
+        max_write_buffer_number: int = 4,
+        max_background_compactions: int = 4,
+        block_cache_size_mb: int = 256,
+        enable_wal: bool = True,
+        sync_wal: bool = False,
     ) -> None:
         self.write_buffer_size = write_buffer_size_mb * 1024 * 1024
         self.max_write_buffer_number = max_write_buffer_number
@@ -43,177 +55,373 @@ class RocksDBOptions:
 
 class RocksDBStateStore(StateStore[str, Dict[str, Any]]):
     """
-    Embedded RocksDB State Store engine with JSON/MsgPack serialization,
-    Write-Ahead-Log (WAL), and point-in-time checkpoint capability.
+    Embedded RocksDB-style state store engine.
+
+    The implementation provides an in-memory emulation layer for environments
+    where the native RocksDB C++ binary is unavailable.
+
+    Storage hierarchy:
+
+        Active MemTable
+              ↓
+        Immutable MemTables
+              ↓
+        Level 0 SSTable
+              ↓
+        Level 1 SSTable
+              ↓
+        Level 2 SSTable
+
+    Values are serialized as JSON strings.
     """
+
+    TOMBSTONE = "__DELETED__"
+    TOMBSTONE_FIELD = "_DELETED__"
+    MEMTABLE_FLUSH_THRESHOLD = 500
 
     def __init__(
         self,
         db_path: str,
         partition_id: int,
         options: Optional[RocksDBOptions] = None,
-        storage_mode: str = "demo",
     ) -> None:
         self.db_path = db_path
         self.partition_id = partition_id
         self.options = options or RocksDBOptions()
-        self.storage_mode = storage_mode
-        if storage_mode == "production":
-            try:
-                import rocksdict  # noqa: F401
-            except Exception as e:
-                raise RuntimeError(
-                    "STORAGE_MODE=production requires rocksdict installed (Linux/Docker worker). "
-                    f"Original error: {e}"
-                )
-        
-        # Internal in-memory emulation layer for environments without C++ rocksdb binary
+
+        # Active in-memory MemTable.
         self._memtable: Dict[str, str] = {}
+
+        # Older immutable MemTables waiting for compaction.
         self._immutable_memtables: list[Dict[str, str]] = []
-        self._sstable_layers: list[Dict[str, str]] = [{}, {}, {}]  # L0, L1, L2
+
+        # Simulated SSTable layers: L0, L1 and L2.
+        self._sstable_layers: list[Dict[str, str]] = [
+            {},
+            {},
+            {},
+        ]
+
+        # Monotonic WAL sequence number.
         self._wal_sequence: int = 0
+
+        # Store lifecycle state.
         self._is_open: bool = False
-        
+
         self.open()
 
     def open(self) -> None:
-        """Initialize the database directory and load existing SSTables."""
+        """Initialize the database directory."""
+        if self._is_open:
+            return
+
         os.makedirs(self.db_path, exist_ok=True)
         self._is_open = True
-        logger.info(f"[Partition {self.partition_id}] RocksDB opened at {self.db_path}")
 
-    def get(self, key: str) -> Optional[Dict[str, Any]]:
-        """
-        Query hierarchy:
-        1. Active MemTable (RAM)
-        2. Immutable MemTables (RAM)
-        3. Level 0 -> Level 1 -> Level 2 SSTables (Disk cache)
-        """
+        logger.info(
+            f"[Partition {self.partition_id}] "
+            f"RocksDB opened at {self.db_path}"
+        )
+
+    def _ensure_open(self) -> None:
+        """Raise an error if the state store is closed."""
         if not self._is_open:
-            raise RuntimeError("Cannot read from closed RocksDB store.")
+            raise RuntimeError("RocksDB state store is closed.")
 
-        # Check Active Memtable
+    @staticmethod
+    def _serialize(value: Dict[str, Any]) -> str:
+        """Serialize a state value to JSON."""
+        return json.dumps(value, separators=(",", ":"))
+
+    @staticmethod
+    def _deserialize(raw: str) -> Optional[Dict[str, Any]]:
+        """Deserialize a JSON value safely."""
+        if raw == RocksDBStateStore.TOMBSTONE:
+            return None
+
+        try:
+            value = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+
+        if (
+            isinstance(value, dict)
+            and value.get(RocksDBStateStore.TOMBSTONE_FIELD) is True
+        ):
+            return None
+
+        return value if isinstance(value, dict) else None
+
+    def _lookup_raw(self, key: str) -> Optional[str]:
+        """
+        Search the storage hierarchy for a key.
+
+        Newer state has priority over older state.
+        """
+
+        # Active MemTable has the newest data.
         if key in self._memtable:
-            val = self._memtable[key]
-            return json.loads(val) if val != "__DELETED__" else None
+            return self._memtable[key]
 
-        # Check Immutable Memtables
-        for imm in reversed(self._immutable_memtables):
-            if key in imm:
-                val = imm[key]
-                return json.loads(val) if val != "__DELETED__" else None
+        # Search immutable MemTables from newest to oldest.
+        for immutable in reversed(self._immutable_memtables):
+            if key in immutable:
+                return immutable[key]
 
-        # Check SSTable levels
+        # Search SSTable layers from newest to oldest.
         for level_table in self._sstable_layers:
             if key in level_table:
-                val = level_table[key]
-                return json.loads(val) if val != "__DELETED__" else None
+                return level_table[key]
 
         return None
 
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve a state value by key.
+
+        Search order:
+        1. Active MemTable
+        2. Immutable MemTables
+        3. L0 SSTable
+        4. L1 SSTable
+        5. L2 SSTable
+        """
+
+        self._ensure_open()
+
+        raw = self._lookup_raw(key)
+
+        if raw is None:
+            return None
+
+        return self._deserialize(raw)
+
     def put(self, key: str, value: Dict[str, Any]) -> None:
         """
-        1. Append to Write-Ahead Log (WAL) for durability.
-        2. Insert into in-memory MemTable (Skiplist).
-        3. Trigger flush to SSTable if write buffer capacity is reached.
-        """
-        if not self._is_open:
-            raise RuntimeError("Cannot write to closed RocksDB store.")
+        Write a value into the state store.
 
-        serialized = json.dumps(value)
+        The operation:
+        1. Advances the WAL sequence.
+        2. Serializes the value.
+        3. Writes to the active MemTable.
+        4. Flushes the MemTable when the threshold is reached.
+        """
+
+        self._ensure_open()
+
+        if not isinstance(key, str):
+            raise TypeError("State-store keys must be strings.")
+
+        if not isinstance(value, dict):
+            raise TypeError("State-store values must be dictionaries.")
+
+        serialized = self._serialize(value)
+
+        # Advance logical WAL sequence.
         self._wal_sequence += 1
+
+        # Write into active MemTable.
         self._memtable[key] = serialized
 
-        # Flush based on configured write-buffer byte size (approx via serialized bytes).
-        try:
-            mem_bytes = sum(len(v.encode("utf-8")) for v in self._memtable.values())
-        except Exception:
-            mem_bytes = len(self._memtable) * 140
-        if mem_bytes >= self.options.write_buffer_size:
+        # Flush when the buffer reaches its configured threshold.
+        if len(self._memtable) >= self.MEMTABLE_FLUSH_THRESHOLD:
             self._flush_memtable()
 
     def delete(self, key: str) -> None:
-        """Write a tombstone marker for the key."""
-        if not self._is_open:
-            raise RuntimeError("Cannot write to closed RocksDB store.")
+        """
+        Delete a key using a tombstone marker.
+
+        Tombstones allow deletes to propagate correctly through the
+        storage hierarchy.
+        """
+
+        self._ensure_open()
+
+        if not isinstance(key, str):
+            raise TypeError("State-store keys must be strings.")
+
         self._wal_sequence += 1
-        self._memtable[key] = "__DELETED__"
+        self._memtable[key] = self.TOMBSTONE
+
+        if len(self._memtable) >= self.MEMTABLE_FLUSH_THRESHOLD:
+            self._flush_memtable()
 
     def _flush_memtable(self) -> None:
-        """Flush active MemTable to Level 0 SSTable and reset buffer."""
-        logger.debug(f"[Partition {self.partition_id}] Flushing MemTable to SSTable L0...")
-        self._immutable_memtables.append(self._memtable.copy())
-        self._sstable_layers[0].update(self._memtable)
+        """
+        Flush the active MemTable to the L0 SSTable layer.
+
+        A copy is retained as an immutable table for the configured number
+        of buffers, while the active MemTable is reset.
+        """
+
+        if not self._memtable:
+            return
+
+        logger.debug(
+            f"[Partition {self.partition_id}] "
+            "Flushing MemTable to SSTable L0..."
+        )
+
+        immutable_snapshot = self._memtable.copy()
+
+        self._immutable_memtables.append(immutable_snapshot)
+
+        # Newer writes overwrite older L0 values.
+        self._sstable_layers[0].update(immutable_snapshot)
+
         self._memtable.clear()
-        
-        # Keep immutable tables under limit
-        if len(self._immutable_memtables) > self.options.max_write_buffer_number:
+
+        # Keep the number of immutable buffers bounded.
+        max_buffers = max(
+            1,
+            self.options.max_write_buffer_number,
+        )
+
+        while len(self._immutable_memtables) > max_buffers:
             self._immutable_memtables.pop(0)
 
+    def scan(
+        self,
+        prefix: str = "",
+    ) -> Iterator[Tuple[str, Dict[str, Any]]]:
+        """
+        Iterate through live state entries matching a key prefix.
+
+        The newest value for each key wins.
+
+        Deleted/tombstoned entries are not returned.
+        """
+
+        self._ensure_open()
+
+        # Merge from oldest to newest so newer values overwrite older values.
+        merged: Dict[str, str] = {}
+
+        for level_table in reversed(self._sstable_layers):
+            merged.update(level_table)
+
+        for immutable in self._immutable_memtables:
+            merged.update(immutable)
+
+        merged.update(self._memtable)
+
+        for key in sorted(merged.keys()):
+            if prefix and not key.startswith(prefix):
+                continue
+
+            value = self._deserialize(merged[key])
+
+            if value is None:
+                continue
+
+            yield key, value
+
+    def estimate_keys(self) -> int:
+        """
+        Estimate the number of distinct active keys.
+
+        Tombstoned keys are excluded from the returned count.
+        """
+
+        self._ensure_open()
+
+        merged: Dict[str, str] = {}
+
+        # Older → newer merge gives newest value priority.
+        for level_table in reversed(self._sstable_layers):
+            merged.update(level_table)
+
+        for immutable in self._immutable_memtables:
+            merged.update(immutable)
+
+        merged.update(self._memtable)
+
+        active_keys = 0
+
+        for raw_value in merged.values():
+            if self._deserialize(raw_value) is not None:
+                active_keys += 1
+
+        return active_keys
+
     def commit(self) -> int:
-        """Commit WAL and return monotonic sequence offset."""
+        """
+        Commit the current logical WAL position.
+
+        Returns the monotonic sequence offset.
+        """
+
+        self._ensure_open()
+
         return self._wal_sequence
 
     def create_checkpoint(self, checkpoint_path: str) -> str:
-        """Create a point-in-time snapshot directory for partition migration."""
+        """
+        Create a point-in-time checkpoint directory for partition migration.
+        """
+
+        self._ensure_open()
+
         os.makedirs(checkpoint_path, exist_ok=True)
-        # Flush active state before snapshotting
+
+        # Flush active state before creating the checkpoint.
         self._flush_memtable()
-        
+
         snapshot_metadata = {
             "partition_id": self.partition_id,
             "wal_sequence": self._wal_sequence,
-            "total_keys": sum(len(lvl) for lvl in self._sstable_layers),
+            "total_keys": self.estimate_keys(),
         }
-        with open(os.path.join(checkpoint_path, "metadata.json"), "w") as f:
-            json.dump(snapshot_metadata, f, indent=2)
-            
-        logger.info(f"Created RocksDB checkpoint for partition {self.partition_id} at {checkpoint_path}")
+
+        metadata_path = os.path.join(
+            checkpoint_path,
+            "metadata.json",
+        )
+
+        with open(
+            metadata_path,
+            "w",
+            encoding="utf-8",
+        ) as metadata_file:
+            json.dump(
+                snapshot_metadata,
+                metadata_file,
+                indent=2,
+            )
+
+        logger.info(
+            f"Created RocksDB checkpoint for partition "
+            f"{self.partition_id} at {checkpoint_path}"
+        )
+
         return checkpoint_path
 
-    def scan(self, prefix: str = "") -> Iterator[Tuple[str, Dict[str, Any]]]:
-        """Iterate live (non-tombstoned) entries matching prefix, newest-write-wins."""
-        if not self._is_open:
-            raise RuntimeError("Cannot scan closed RocksDB store.")
-        merged: Dict[str, str] = {}
-        for level_table in self._sstable_layers:
-            merged.update(level_table)
-        for imm in self._immutable_memtables:
-            merged.update(imm)
-        merged.update(self._memtable)
-        for k in sorted(merged.keys()):
-            if prefix and not k.startswith(prefix):
-                continue
-            raw = merged[k]
-            if raw == "__DELETED__":
-                continue
-            try:
-                val = json.loads(raw)
-            except Exception:
-                continue
-            if isinstance(val, dict) and val.get("__DELETED__") is True:
-                continue
-            yield k, val
-
-    def estimate_keys(self) -> int:
-        """Estimate total distinct active keys across MemTable and SSTables."""
-        all_keys = set(self._memtable.keys())
-        for imm in self._immutable_memtables:
-            all_keys.update(imm.keys())
-        for sst in self._sstable_layers:
-            all_keys.update(sst.keys())
-        return len(all_keys)
-
     def close(self) -> None:
-
         """Safely close the state store and flush active buffers."""
-        if self._is_open:
-            self._flush_memtable()
-            self._is_open = False
-            logger.info(f"[Partition {self.partition_id}] RocksDB closed safely.")
+
+        if not self._is_open:
+            return
+
+        self._flush_memtable()
+
+        self._is_open = False
+
+        logger.info(
+            f"[Partition {self.partition_id}] "
+            "RocksDB closed safely."
+        )
 
     def __enter__(self) -> "RocksDBStateStore":
+        """Enter context-manager mode."""
+        self._ensure_open()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type,
+        exc_val,
+        exc_tb,
+    ) -> None:
+        """Close the store when leaving a context manager."""
         self.close()
+

@@ -164,10 +164,10 @@ const WORKER_PALETTES = [
 export function getWorkerPalette(workerId: string | null | undefined) {
   if (!workerId) {
     return {
-      bg: 'bg-[#16202e]/60',
+      bg: 'bg-slate-800/60',
       text: 'text-slate-400',
-      border: 'border-[#223348]',
-      badge: 'bg-[#16202e] text-slate-400 border-[#223348]',
+      border: 'border-slate-700',
+      badge: 'bg-slate-800 text-slate-400 border-slate-700',
       bar: 'bg-slate-600',
       dot: 'bg-slate-500',
     };
@@ -304,9 +304,9 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
   const unassignedCount = partitions.filter((p) => !p.assignedWorker).length;
 
   return (
-    <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl space-y-6">
+    <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl space-y-6">
       {/* 1. Header with Title & KPI Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-[#223348] pb-5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-700/40 pb-5">
         <div className="flex items-center gap-3.5">
           <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.3)]">
             <Layers className="w-5 h-5 text-indigo-400" />
@@ -331,7 +331,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
 
         {/* View Mode Switcher and Actions */}
         <div className="flex items-center gap-2.5 flex-wrap">
-          <div className="flex items-center bg-[#0a0c10] border border-[#223348] rounded-2xl p-1 text-xs font-mono">
+          <div className="flex items-center bg-[#05070a] border border-slate-700/60 rounded-2xl p-1 text-xs font-mono">
             <button
               onClick={() => setViewMode('spectrum')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
@@ -371,7 +371,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
 
       {/* 2. Top-Level Metric Badges (Bento Row) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
-        <div className="bg-[#16202e] p-3.5 rounded-2xl border border-[#223348]">
+        <div className="bg-[#05070a]/70 p-3.5 rounded-2xl border border-slate-700/40">
           <div className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
             <Hash className="w-3.5 h-3.5 text-indigo-400" /> Total Partitions
           </div>
@@ -382,7 +382,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
           </div>
         </div>
 
-        <div className="bg-[#16202e] p-3.5 rounded-2xl border border-[#223348]">
+        <div className="bg-[#05070a]/70 p-3.5 rounded-2xl border border-slate-700/40">
           <div className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
             <Server className="w-3.5 h-3.5 text-cyan-400" /> Assigned Worker Nodes
           </div>
@@ -394,7 +394,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
           </div>
         </div>
 
-        <div className="bg-[#16202e] p-3.5 rounded-2xl border border-[#223348]">
+        <div className="bg-[#05070a]/70 p-3.5 rounded-2xl border border-slate-700/40">
           <div className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
             <Zap className="w-3.5 h-3.5 text-amber-400" /> Ingestion Rate
           </div>
@@ -406,7 +406,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
           </div>
         </div>
 
-        <div className="bg-[#16202e] p-3.5 rounded-2xl border border-[#223348]">
+        <div className="bg-[#05070a]/70 p-3.5 rounded-2xl border border-slate-700/40">
           <div className="text-[10px] text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
             <Activity className="w-3.5 h-3.5 text-emerald-400" /> Total Consumer Lag
           </div>
@@ -419,7 +419,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
       </div>
 
       {/* 3. CONTINUOUS REAL-TIME PARTITION SPECTRUM RIBBON */}
-      <div className="bg-[#0a0c10] border border-[#223348] rounded-2xl p-4.5 space-y-3 shadow-inner">
+      <div className="bg-[#05070a]/90 border border-slate-700/60 rounded-2xl p-4.5 space-y-3 shadow-inner">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-ping" />
@@ -485,7 +485,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                 </div>
 
                 {/* Lag mini bar */}
-                <div className="w-full h-1 bg-[#0a0c10] rounded-full overflow-hidden mt-1">
+                <div className="w-full h-1 bg-slate-900 rounded-full overflow-hidden mt-1">
                   <div
                     className={`h-full ${p.lag > 25 ? 'bg-rose-500' : p.lag > 10 ? 'bg-amber-500' : 'bg-emerald-500'}`}
                     style={{ width: `${Math.min(100, Math.max(15, p.lag * 4))}%` }}
@@ -497,7 +497,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
         </div>
 
         {/* Visual Range Brackets grouping continuous assignments */}
-        <div className="pt-2 border-t border-[#1e293b]">
+        <div className="pt-2 border-t border-slate-800/80">
           <div className="text-[10px] text-slate-400 uppercase tracking-widest font-mono mb-2 flex items-center justify-between">
             <span>Detected Worker Responsible Partition Ranges:</span>
             <span className="text-indigo-400 font-bold">{spectrumBlocks.length} Active Range Segments</span>
@@ -532,7 +532,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                   <span className={`font-bold ${isCrashed ? 'text-rose-400' : palette.text}`}>
                     {block.workerId || 'UNASSIGNED'}
                   </span>
-                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#0a0c10] text-slate-400 border border-[#223348]">
+                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-900/80 text-slate-400 border border-slate-800">
                     {block.partitions.length} {block.partitions.length === 1 ? 'part' : 'parts'}
                   </span>
                 </div>
@@ -546,8 +546,8 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
       {viewMode === 'spectrum' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Left: 32 Partitions Interactive Cards (8 Cols) */}
-          <div className="lg:col-span-8 bg-[#16202e] border border-[#223348] rounded-2xl p-4.5 space-y-3.5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#223348] pb-3">
+          <div className="lg:col-span-8 bg-[#05070a]/70 border border-slate-700/40 rounded-2xl p-4.5 space-y-3.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
               <div>
                 <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
                   <Hash className="w-3.5 h-3.5 text-indigo-400" />
@@ -565,7 +565,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                   placeholder="Filter partition (e.g. P04, W02)..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-[#0a0c10] border border-[#223348] rounded-xl pl-8 pr-3 py-1 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 w-52 font-mono"
+                  className="bg-[#111620] border border-slate-700/60 rounded-xl pl-8 pr-3 py-1 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 w-52 font-mono"
                 />
               </div>
             </div>
@@ -599,13 +599,13 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                       className={`p-3 rounded-xl border text-xs font-mono transition cursor-pointer flex flex-col justify-between ${
                         isSelected
                           ? 'border-indigo-400 bg-indigo-950/40 shadow-lg ring-1 ring-indigo-500'
-                          : 'bg-[#111827] border-[#223348] hover:border-slate-500'
+                          : 'bg-[#111620]/60 border-slate-800 hover:border-slate-600'
                       }`}
                     >
                       <div>
                         {/* Header */}
                         <div className="flex items-center justify-between mb-1.5">
-                          <span className="font-bold text-white flex items-center gap-1.5">
+                          <span className="font-bold text-slate-100 flex items-center gap-1.5">
                             <span className="text-indigo-400">P{p.partitionId.toString().padStart(2, '0')}</span>
                           </span>
                           <span
@@ -636,12 +636,12 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                         {/* Range Label if part of a group */}
                         <div className="text-[10px] text-slate-400 truncate mb-1">
                           <span className="text-slate-500">Range: </span>
-                          <span className="text-slate-200 font-semibold">{rangeInfo?.formatted || 'None'}</span>
+                          <span className="text-slate-300 font-semibold">{rangeInfo?.formatted || 'None'}</span>
                         </div>
                       </div>
 
                       {/* Footer: throughput */}
-                      <div className="mt-2 pt-2 border-t border-[#223348] flex items-center justify-between text-[10px] text-slate-400">
+                      <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
                         <span>Throughput</span>
                         <span className="text-emerald-400 font-bold">{p.throughput} msg/s</span>
                       </div>
@@ -652,8 +652,8 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
           </div>
 
           {/* Right: Active Partition & Responsible Worker Inspector (4 Cols) */}
-          <div className="lg:col-span-4 bg-[#16202e] border border-[#223348] rounded-2xl p-5 space-y-4 shadow-xl">
-            <div className="border-b border-[#223348] pb-3 flex items-center justify-between">
+          <div className="lg:col-span-4 bg-[#05070a]/80 border border-slate-700/50 rounded-2xl p-5 space-y-4 shadow-xl">
+            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
                   <Eye className="w-4 h-4 text-indigo-400" />
@@ -676,7 +676,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
             {activePartition ? (
               <div className="space-y-4 text-xs font-mono">
                 {/* Worker Assignment Card */}
-                <div className="bg-[#111827] p-3.5 rounded-xl border border-[#223348] space-y-2">
+                <div className="bg-[#111620] p-3.5 rounded-xl border border-slate-700/60 space-y-2">
                   <div className="text-[10px] text-slate-400 uppercase tracking-wider flex items-center justify-between">
                     <span>Currently Responsible Worker:</span>
                     <span
@@ -699,14 +699,14 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                     {activePartitionWorker && (
                       <button
                         onClick={() => onSelectWorker(activePartitionWorker)}
-                        className="text-[10px] px-2 py-1 rounded bg-[#1f2d40] hover:bg-slate-700 text-indigo-300 transition"
+                        className="text-[10px] px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 transition"
                       >
                         Deep Dive
                       </button>
                     )}
                   </div>
 
-                  <div className="pt-2 border-t border-[#223348] flex justify-between text-[11px]">
+                  <div className="pt-2 border-t border-slate-800 flex justify-between text-[11px]">
                     <span className="text-slate-400">Worker's Full Range:</span>
                     <span className="text-indigo-300 font-bold">
                       {workerRanges.get(activePartition.assignedWorker || '')?.formatted || 'None'}
@@ -715,27 +715,27 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                 </div>
 
                 {/* Kafka Offset & Watermark Metrics */}
-                <div className="bg-[#111827] p-3.5 rounded-xl border border-[#223348] space-y-2.5">
+                <div className="bg-[#111620] p-3.5 rounded-xl border border-slate-700/60 space-y-2.5">
                   <div className="text-[10px] text-indigo-400 uppercase tracking-widest flex items-center gap-1.5 font-bold">
                     <Database className="w-3.5 h-3.5" /> Kafka Partition Offset Telemetry
                   </div>
 
-                  <div className="flex justify-between py-1 border-b border-[#223348]">
+                  <div className="flex justify-between py-1 border-b border-slate-800">
                     <span className="text-slate-400">Current Committed Offset:</span>
-                    <span className="text-white font-bold">{activePartition.currentOffset.toLocaleString()}</span>
+                    <span className="text-slate-100 font-bold">{activePartition.currentOffset.toLocaleString()}</span>
                   </div>
 
-                  <div className="flex justify-between py-1 border-b border-[#223348]">
+                  <div className="flex justify-between py-1 border-b border-slate-800">
                     <span className="text-slate-400">Log End Offset (LEO):</span>
                     <span className="text-slate-200">{activePartition.logEndOffset.toLocaleString()}</span>
                   </div>
 
-                  <div className="flex justify-between py-1 border-b border-[#223348]">
+                  <div className="flex justify-between py-1 border-b border-slate-800">
                     <span className="text-slate-400">High Watermark:</span>
                     <span className="text-cyan-300">{activePartition.highWatermark.toLocaleString()}</span>
                   </div>
 
-                  <div className="flex justify-between py-1 border-b border-[#223348]">
+                  <div className="flex justify-between py-1 border-b border-slate-800">
                     <span className="text-slate-400">Consumer Lag:</span>
                     <span
                       className={`font-bold ${
@@ -767,7 +767,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                         %
                       </span>
                     </div>
-                    <div className="w-full h-1.5 bg-[#0a0c10] rounded-full overflow-hidden">
+                    <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden">
                       <div className="h-full bg-indigo-500 rounded-full" style={{ width: '99.8%' }} />
                     </div>
                   </div>
@@ -775,7 +775,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
 
                 {/* RocksDB State in Worker for this Partition */}
                 {activePartitionWorker && (
-                  <div className="bg-[#111827] p-3.5 rounded-xl border border-[#223348] space-y-2">
+                  <div className="bg-[#111620] p-3.5 rounded-xl border border-slate-700/60 space-y-2">
                     <div className="text-[10px] text-amber-400 uppercase tracking-widest flex items-center gap-1.5 font-bold">
                       <HardDrive className="w-3.5 h-3.5" /> Embedded State Store (RocksDB)
                     </div>
@@ -821,7 +821,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
       {/* 5. VIEW MODE: WORKER RANGE MATRIX */}
       {viewMode === 'matrix' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#223348] pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
             <div>
               <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
                 <Server className="w-4 h-4 text-indigo-400" />
@@ -839,7 +839,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                 placeholder="Search worker or partition range..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-[#0a0c10] border border-[#223348] rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 w-64 font-mono"
+                className="bg-[#05070a] border border-slate-700/60 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 w-64 font-mono"
               />
             </div>
           </div>
@@ -868,7 +868,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                       ? 'border-rose-500/50 bg-rose-950/20'
                       : isRecovering
                       ? 'border-amber-500/50 bg-amber-950/20'
-                      : 'border-[#223348] bg-[#16202e] hover:border-slate-500'
+                      : 'border-slate-800 bg-[#05070a]/80 hover:border-slate-600'
                   }`}
                 >
                   <div>
@@ -892,7 +892,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                     </div>
 
                     {/* ASSIGNED PARTITION RANGE IN BOLD */}
-                    <div className="bg-[#0a0c10] p-2.5 rounded-xl border border-[#223348] mb-3">
+                    <div className="bg-[#111620] p-2.5 rounded-xl border border-slate-700/60 mb-3">
                       <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-1">
                         Responsible Partition Range:
                       </div>
@@ -901,7 +901,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                       </div>
                       <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
                         <span>Partitions Count:</span>
-                        <span className="font-bold text-white">{w.assignedPartitions.length}</span>
+                        <span className="font-bold text-slate-200">{w.assignedPartitions.length}</span>
                       </div>
                     </div>
 
@@ -909,7 +909,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                     <div className="space-y-1 text-[11px] mb-3">
                       <div className="flex justify-between text-slate-400">
                         <span>Aggregate Lag:</span>
-                        <span className="text-white font-bold">{workerLag} msgs</span>
+                        <span className="text-slate-200 font-bold">{workerLag} msgs</span>
                       </div>
                       <div className="flex justify-between text-slate-400">
                         <span>Total Throughput:</span>
@@ -923,7 +923,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                   </div>
 
                   {/* Quick Partition List Badges */}
-                  <div className="pt-2.5 border-t border-[#223348] flex flex-wrap gap-1">
+                  <div className="pt-2.5 border-t border-slate-800/80 flex flex-wrap gap-1">
                     {w.assignedPartitions.map((pId) => (
                       <span
                         key={pId}
@@ -952,7 +952,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
       {/* 6. VIEW MODE: RANGE TOPOLOGY FLOW */}
       {viewMode === 'flow' && (
         <div className="space-y-4 font-mono text-xs">
-          <div className="border-b border-[#223348] pb-3">
+          <div className="border-b border-slate-800 pb-3">
             <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
               <GitBranch className="w-4 h-4 text-indigo-400" />
               Kafka Partition Range to Worker Architecture Topology
@@ -977,8 +977,8 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
               ) as string[];
 
               return (
-                <div key={idx} className="bg-[#16202e] border border-[#223348] rounded-2xl p-4 space-y-3">
-                  <div className="border-b border-[#223348] pb-2">
+                <div key={idx} className="bg-[#05070a]/90 border border-slate-700/60 rounded-2xl p-4 space-y-3">
+                  <div className="border-b border-slate-800 pb-2">
                     <div className="text-xs font-bold text-white">{quad.title}</div>
                     <div className="text-[10px] text-slate-400">{quad.desc}</div>
                   </div>
@@ -1009,7 +1009,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                   </div>
 
                   {/* Workers serving this tier */}
-                  <div className="pt-2 border-t border-[#223348]">
+                  <div className="pt-2 border-t border-slate-800">
                     <div className="text-[9px] text-slate-400 uppercase tracking-widest mb-1.5">
                       Assigned Workers ({assignedWorkerIds.length}):
                     </div>

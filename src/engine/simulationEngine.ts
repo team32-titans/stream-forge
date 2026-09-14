@@ -7,7 +7,6 @@ import {
   WindowAggregate,
   WorkerNode,
 } from '../types/stream';
-import { streamApi, ConnectionStatus, PythonEngineStatus } from '../lib/api';
 
 export class StreamForgeSimulation {
   public workers: WorkerNode[] = [];
@@ -19,11 +18,6 @@ export class StreamForgeSimulation {
   public chaosHistory: ChaosEvent[] = [];
   public currentChaosEvent: ChaosEvent | null = null;
   public metrics: StreamMetrics;
-
-  // Backend Bridge State
-  public connectionStatus: ConnectionStatus = 'CONNECTING';
-  public pythonEngineStatus: PythonEngineStatus | null = null;
-  public isLiveBackendEnabled: boolean = true;
   
   private isRunning: boolean = true;
   private eventRate: number = 25000; // default 25,000 events/sec simulated
@@ -36,11 +30,9 @@ export class StreamForgeSimulation {
   private currentWatermark: number = Date.now() - 15000;
 
   constructor() {
-    // INITIAL_DEMO_* seeds: display-only starting point for DEMO mode.
-    // LIVE mode overwrites these from /api/* + WS as soon as backend connects.
     this.metrics = {
-      totalEventsProcessed: 1428500, // INITIAL_DEMO_EVENTS
-      currentThroughput: 24800, // INITIAL_DEMO_THROUGHPUT
+      totalEventsProcessed: 1428500,
+      currentThroughput: 24800,
       peakThroughput: 104200,
       averageLatencyMs: 0.84,
       p95LatencyMs: 1.22,
@@ -57,89 +49,6 @@ export class StreamForgeSimulation {
 
     this.initializeCluster();
     this.seedInitialState();
-    this.setupBackendBridge();
-  }
-
-  private setupBackendBridge(): void {
-    // 1. Connection status change listener
-    streamApi.onStatusChange((status) => {
-      this.connectionStatus = status;
-      this.notify();
-    });
-
-    // 2. Telemetry stream listener from WebSocket / HTTP Fallback
-    streamApi.onTelemetry((events: any[]) => {
-      if (!this.isLiveBackendEnabled || !events || events.length === 0) return;
-
-      const mappedEvents: TelemetryEvent[] = events.map((e: any) => ({
-        truckId: e.truckId || e.truck_id || 'TRK-00100',
-        partition: typeof e.partition === 'number' ? e.partition : 0,
-        temperature: typeof e.temperature === 'number' ? e.temperature : -20.0,
-        timestamp: e.timestamp || Date.now(),
-        engineRpm: e.engineRpm || e.engine_rpm || Math.floor(1400 + Math.random() * 800),
-        latitude: e.latitude || (37.77 + (Math.random() - 0.5) * 0.1),
-        longitude: e.longitude || (-122.41 + (Math.random() - 0.5) * 0.1),
-        speedKmH: typeof e.speedKmH === 'number' ? e.speedKmH : (e.speed_kmh || 70),
-        refrigerationStatus:
-          e.refrigerationStatus ||
-          e.refrigeration_status ||
-          (e.temperature > 0 ? 'CRITICAL' : 'OPTIMAL'),
-        doorOpen: Boolean(e.doorOpen || e.door_open),
-      }));
-
-      this.recentEvents = [...mappedEvents, ...this.recentEvents].slice(0, 35);
-      mappedEvents.forEach((ev) => this.updateWindowAggregate(ev));
-      this.notify();
-    });
-
-    // 3. Metrics update listener
-    streamApi.onMetrics((metrics: any) => {
-      if (!this.isLiveBackendEnabled || !metrics) return;
-      if (typeof metrics.throughput === 'number') {
-        this.metrics.currentThroughput = metrics.throughput;
-      }
-      if (typeof metrics.eventsTotal === 'number' || typeof metrics.totalEvents === 'number') {
-        this.metrics.totalEventsProcessed = metrics.eventsTotal || metrics.totalEvents;
-      }
-      if (typeof metrics.p99LatencyMs === 'number') {
-        this.metrics.p99LatencyMs = metrics.p99LatencyMs;
-      }
-      if (typeof metrics.healthyWorkers === 'number') {
-        this.metrics.healthyWorkers = metrics.healthyWorkers;
-      }
-      this.notify();
-    });
-
-    // 4. Chaos sync listener
-    streamApi.onChaosEvent((chaosData: any) => {
-      if (chaosData && chaosData.workerId) {
-        const target = this.workers.find((w) => w.id === chaosData.workerId);
-        if (target && target.status !== 'CRASHED') {
-          target.status = 'CRASHED';
-          this.rebalancePartitions();
-          this.notify();
-        }
-      }
-    });
-
-    // 5. Python engine status listener
-    streamApi.onPythonStatus((status) => {
-      this.pythonEngineStatus = status;
-      if (status && status.throughput) {
-        this.metrics.currentThroughput = Math.round(status.throughput);
-      }
-      this.notify();
-    });
-
-    // Initiate connection on browser
-    if (typeof window !== 'undefined') {
-      streamApi.connect();
-    }
-  }
-
-  public setLiveBackendEnabled(enabled: boolean): void {
-    this.isLiveBackendEnabled = enabled;
-    this.notify();
   }
 
   public subscribe(listener: () => void): () => void {
@@ -267,11 +176,7 @@ export class StreamForgeSimulation {
   }
 
   public startSimulation(): void {
-    // StrictMode-safe: never allow duplicate intervals.
-    if (this.tickInterval) {
-      window.clearInterval(this.tickInterval);
-      this.tickInterval = null;
-    }
+    if (this.tickInterval) return;
     this.isRunning = true;
     this.tickInterval = window.setInterval(() => {
       if (!this.isRunning) return;
@@ -300,7 +205,6 @@ export class StreamForgeSimulation {
 
   public setRate(rate: number): void {
     this.eventRate = Math.max(1000, Math.min(150000, rate));
-    streamApi.setRate(this.eventRate);
     this.notify();
   }
 
@@ -490,13 +394,6 @@ export class StreamForgeSimulation {
     this.chaosHistory.unshift(chaosEvent);
     this.metrics.healthyWorkers = this.workers.filter((w) => w.status === 'HEALTHY').length;
     this.notify();
-
-    // Trigger on backend via streamApi WebSocket and REST proxy
-    try {
-      streamApi.triggerChaos(workerId).catch(() => {});
-    } catch (e) {
-      // safe fallback
-    }
 
     // Step 1: Assign to Worker 05 (or next available healthy worker)
     await new Promise((r) => setTimeout(r, 700));
