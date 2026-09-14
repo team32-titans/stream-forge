@@ -132,7 +132,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                   STREAM FORGE
                 </h1>
                 <span className="text-[10px] uppercase tracking-[0.15em] px-2 py-0.5 rounded bg-[#16202e] text-orange-400 border border-[#223348] font-mono font-bold">
-                  v2.4.0
+                  v1.0.0
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 uppercase tracking-[0.15em] mt-1 font-mono">

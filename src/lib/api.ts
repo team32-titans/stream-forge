@@ -156,7 +156,7 @@ export class StreamApiClient {
         this.send({
           action: 'CLIENT_HELLO',
           client: 'StreamForge-Web-Frontend',
-          version: '2.4.0',
+          version: '1.0.0',
           timestamp: Date.now(),
         });
       };
@@ -403,3 +403,30 @@ export class StreamApiClient {
 
 // Global Singleton Instance
 export const streamApi = new StreamApiClient();
+
+// --- Compatibility helpers for hooks (LIVE vs DEMO) ---
+export const IS_DEMO =
+  typeof window !== 'undefined' &&
+  (new URLSearchParams(window.location.search).has('demo') ||
+    (import.meta as any)?.env?.VITE_DEMO_MODE === 'true');
+
+export function metricsWsUrl(): string {
+  if (typeof window === 'undefined') return 'ws://localhost:8000/ws/metrics';
+  const loc = window.location;
+  // Prefer same-origin FastAPI WS when served via Vite proxy; fall back to :8000.
+  const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${loc.host}/ws/metrics`;
+}
+
+export async function fetchMetrics(): Promise<{
+  counters: Record<string, number>;
+  gauges: Record<string, number>;
+}> {
+  const res = await fetch('/api/metrics');
+  if (!res.ok) throw new Error(`Metrics fetch failed: ${res.status}`);
+  const data = await res.json();
+  return {
+    counters: data.counters || {},
+    gauges: data.gauges || {},
+  };
+}

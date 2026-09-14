@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { streamSimulation } from './engine/simulationEngine';
 import { Navbar } from './components/Navbar';
 import { TopologyView } from './components/TopologyView';
 import { ChaosStudio } from './components/ChaosStudio';
@@ -9,15 +10,28 @@ import { FleetMonitor } from './components/FleetMonitor';
 import { MetricsDashboard } from './components/MetricsDashboard';
 import { CodebaseExplorer } from './components/CodebaseExplorer';
 import { Member1Handbook } from './components/Member1Handbook';
-import { streamSimulation } from './engine/simulationEngine';
+
+const BOOT_TIME = Date.now();
+
+function formatUptime(): string {
+  const s = Math.floor((Date.now() - BOOT_TIME) / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return `${d}d ${String(h).padStart(2, '0')}h ${String(m).padStart(2, '0')}m ${String(sec).padStart(2, '0')}s`;
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('topology');
+  const [, forceTick] = useState(0);
 
   useEffect(() => {
-    // Start distributed streaming simulation loop on mount
+    // Start distributed streaming simulation loop on mount (StrictMode-safe).
     streamSimulation.startSimulation();
+    const t = window.setInterval(() => forceTick((x) => x + 1), 1000);
     return () => {
+      window.clearInterval(t);
       streamSimulation.stopSimulation();
     };
   }, []);
@@ -53,9 +67,11 @@ export default function App() {
             <span className="text-orange-400 font-semibold">Distributed Stateful Engine</span>
           </div>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Uptime: 14d 02h 11m 45s</span>
+            <span>Uptime: {formatUptime()} (demo session)</span>
             <span className="text-slate-600">•</span>
-            <span className="text-slate-300">Kafka Offsets: [442,109,223 | 442,110,001]</span>
+            <span className="text-slate-300">
+              Events: {streamSimulation.metrics.totalEventsProcessed.toLocaleString()}
+            </span>
           </div>
         </div>
       </footer>

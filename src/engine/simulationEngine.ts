@@ -36,9 +36,11 @@ export class StreamForgeSimulation {
   private currentWatermark: number = Date.now() - 15000;
 
   constructor() {
+    // INITIAL_DEMO_* seeds: display-only starting point for DEMO mode.
+    // LIVE mode overwrites these from /api/* + WS as soon as backend connects.
     this.metrics = {
-      totalEventsProcessed: 1428500,
-      currentThroughput: 24800,
+      totalEventsProcessed: 1428500, // INITIAL_DEMO_EVENTS
+      currentThroughput: 24800, // INITIAL_DEMO_THROUGHPUT
       peakThroughput: 104200,
       averageLatencyMs: 0.84,
       p95LatencyMs: 1.22,
@@ -265,7 +267,11 @@ export class StreamForgeSimulation {
   }
 
   public startSimulation(): void {
-    if (this.tickInterval) return;
+    // StrictMode-safe: never allow duplicate intervals.
+    if (this.tickInterval) {
+      window.clearInterval(this.tickInterval);
+      this.tickInterval = null;
+    }
     this.isRunning = true;
     this.tickInterval = window.setInterval(() => {
       if (!this.isRunning) return;
