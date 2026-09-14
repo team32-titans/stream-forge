@@ -35,6 +35,8 @@ class TemperatureAccumulator:
 
     def add(self, temp: float) -> None:
         """Incorporate a new temperature sample into the running statistics."""
+        # Correct Welford's online algorithm: delta uses OLD mean.
+        old_mean = self.sum_temp / self.count if self.count > 0 else temp
         self.count += 1
         self.sum_temp += temp
         if temp < self.min_temp:
@@ -42,9 +44,9 @@ class TemperatureAccumulator:
         if temp > self.max_temp:
             self.max_temp = temp
 
-        # Online variance calculation (Welford's method)
-        delta = temp - (self.sum_temp / self.count)
-        delta2 = temp - ((self.sum_temp + temp) / (self.count + 1) if self.count > 0 else temp)
+        new_mean = self.sum_temp / self.count
+        delta = temp - old_mean
+        delta2 = temp - new_mean
         self._m2 += delta * delta2
 
     @property
@@ -70,6 +72,7 @@ class TemperatureAccumulator:
             "min": self.min_temp if self.count > 0 else 0.0,
             "max": self.max_temp if self.count > 0 else 0.0,
             "std_dev": self.std_dev,
+            "m2": round(self._m2, 4),
         }
 
     @classmethod
@@ -79,6 +82,7 @@ class TemperatureAccumulator:
         acc.sum_temp = float(data.get("sum", 0.0))
         acc.min_temp = float(data.get("min", float("inf")))
         acc.max_temp = float(data.get("max", float("-inf")))
+        acc._m2 = float(data.get("m2", 0.0))
         return acc
 
 
@@ -168,18 +172,46 @@ class WindowedRollingAverageProcessor:
         # State: mapping of (truck_id, window_start) -> TemperatureAccumulator
         self.active_windows: Dict[Tuple[str, int], TemperatureAccumulator] = {}
 
+    def _late_policy(self) -> str:
+        """Read LATE_EVENT_POLICY without hard dependency on config at import time."""
+        try:
+            from streamforge.config import get_settings
+
+            return get_settings().late_event_policy
+        except Exception:
+            return "side_output"
+
     def process_telemetry(
         self, event: TruckTelemetryEvent
-    ) -> Tuple[Optional[WindowedAggregateResult], List[WindowedAggregateResult]]:
+    ) -> Tuple[Optional[TruckTelemetryEvent], List[WindowedAggregateResult]]:
         """
-        1. Evaluates watermark against event timestamp.
-        2. Assigns event to appropriate 5-minute windows.
-        3. Updates rolling accumulator.
-        4. Evaluates window closure and triggers emission of completed aggregates.
+        1. Filters temperature <= 0 (cold-chain anomaly pipeline keeps T>0 only).
+        2. Evaluates watermark against event timestamp.
+        3. Assigns event to appropriate 5-minute windows.
+        4. Updates rolling accumulator.
+        5. Evaluates window closure and triggers emission of completed aggregates.
         """
+        # Pipeline filter: only T>0 events carry thermal anomaly signal.
+        # Filtered events do not advance the watermark and create no windows.
+        if event.temperature <= 0:
+            event.is_late = False
+            return (None, [])
+
+        # Late check against current watermark BEFORE advancing with this event.
+        if self.watermark_gen.is_event_late(event.timestamp):
+            event.is_late = True
+            if self._late_policy() == "side_output":
+                return (event, [])
+            return (None, [])
+
         watermark = self.watermark_gen.on_event(event.timestamp)
+        # Re-check after advancing (event could itself be exactly on watermark edge)
         is_late = self.watermark_gen.is_event_late(event.timestamp)
         event.is_late = is_late
+        if is_late:
+            if self._late_policy() == "side_output":
+                return (event, [])
+            return (None, [])
 
         assigned_windows = self.assigner.assign_windows(event.timestamp)
         

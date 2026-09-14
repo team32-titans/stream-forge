@@ -72,21 +72,22 @@ class TestWindowingAndWatermarks(unittest.TestCase):
         base_time = 1709280000000  # 12:00:00 UTC
 
         # Send 3 events inside window [12:00:00 - 12:05:00)
+        # NOTE: pipeline keeps T>0 only (thermal anomaly signal), so use positive temps.
         events = [
             TruckTelemetryEvent(
                 truck_id="TRK-00100",
                 timestamp=base_time + 10_000,  # 12:00:10
-                temperature=-20.0,
+                temperature=4.0,
             ),
             TruckTelemetryEvent(
                 truck_id="TRK-00100",
                 timestamp=base_time + 120_000, # 12:02:00
-                temperature=-18.0,
+                temperature=6.0,
             ),
             TruckTelemetryEvent(
                 truck_id="TRK-00100",
                 timestamp=base_time + 240_000, # 12:04:00
-                temperature=-22.0,
+                temperature=2.0,
             ),
         ]
 
@@ -98,15 +99,15 @@ class TestWindowingAndWatermarks(unittest.TestCase):
         advancing_event = TruckTelemetryEvent(
             truck_id="TRK-00100",
             timestamp=base_time + 320_000,  # 12:05:20
-            temperature=-21.0,
+            temperature=5.0,
         )
         _, emitted = processor.process_telemetry(advancing_event)
-        
+
         self.assertEqual(len(emitted), 1)
         result = emitted[0]
         self.assertEqual(result.truck_id, "TRK-00100")
         self.assertEqual(result.count, 3)
-        self.assertEqual(result.avg_temperature, -20.0)  # (-20 + -18 + -22) / 3
+        self.assertEqual(result.avg_temperature, 4.0)  # (4 + 6 + 2) / 3
 
 
 class TestRocksDBStateAndChaosRecovery(unittest.TestCase):
