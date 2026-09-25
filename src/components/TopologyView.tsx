@@ -20,10 +20,12 @@ import {
   Zap,
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
-import { IS_DEMO } from '../lib/api';
+import { useDemoMode } from '../lib/api';
 import { useLiveMetrics } from '../hooks/useLiveMetrics';
 import { PartitionState, WorkerNode } from '../types/stream';
 import { KafkaPartitionVisualizer, computePartitionRanges } from './KafkaPartitionVisualizer';
+import { RollingTextButton } from './ui/RollingTextButton';
+import { SplitReveal } from './ui/SplitReveal';
 
 export const TopologyView: React.FC = () => {
   const [workers, setWorkers] = useState<WorkerNode[]>(streamSimulation.workers);
@@ -34,10 +36,11 @@ export const TopologyView: React.FC = () => {
   const [livePartitions, setLivePartitions] = useState<any>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   const [liveAttempts, setLiveAttempts] = useState(0);
+  const isDemo = useDemoMode();
   const live = useLiveMetrics(2000);
 
   useEffect(() => {
-    if (IS_DEMO) {
+    if (isDemo) {
       const unsubscribe = streamSimulation.subscribe(() => {
         setWorkers([...streamSimulation.workers]);
         setPartitions([...streamSimulation.partitions]);
@@ -78,7 +81,7 @@ export const TopologyView: React.FC = () => {
       cancelled = true;
       window.clearInterval(t);
     };
-  }, [selectedWorker]);
+  }, [selectedWorker, isDemo]);
 
   const healthyWorkers = workers.filter((w) => w.status === 'HEALTHY');
   const crashedWorkers = workers.filter((w) => w.status === 'CRASHED');
@@ -99,12 +102,17 @@ export const TopologyView: React.FC = () => {
               <Boxes className="w-5 h-5 text-indigo-400" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-                TOPOLOGY VISUALIZATION (DAG) & 20-WORKER CLUSTER
-              </h2>
-              <p className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5">
-                Industrial Kafka partitioned pipeline with embedded RocksDB state stores and 5-min rolling window aggregations
-              </p>
+              <SplitReveal
+                as="h2"
+                text="TOPOLOGY VISUALIZATION (DAG) & 20-WORKER CLUSTER"
+                className="text-base font-bold text-white tracking-tight"
+              />
+              <SplitReveal
+                text="Industrial Kafka partitioned pipeline with embedded RocksDB state stores and 5-min rolling window aggregations"
+                delay={0.3}
+                stagger={0.02}
+                className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5"
+              />
             </div>
           </div>
 
@@ -148,7 +156,7 @@ export const TopologyView: React.FC = () => {
             </div>
             <div className="mt-3 text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl flex items-center justify-between font-mono">
                 <span>CRC32 Keyed</span>
-                <span className="font-bold">{IS_DEMO ? '~25k msg/s (demo)' : live.live ? `${((live.data?.gauges?.['streamforge_events_per_second'] ?? 0) as number).toFixed(0)} msg/s (live)` : 'rate Unavailable'}</span>
+                <span className="font-bold">{isDemo ? '~25k msg/s (demo)' : live.live ? `${((live.data?.gauges?.['streamforge_events_per_second'] ?? 0) as number).toFixed(0)} msg/s (live)` : 'rate Unavailable'}</span>
             </div>
           </div>
 
@@ -166,7 +174,7 @@ export const TopologyView: React.FC = () => {
             </div>
             <div className="mt-3 text-[10px] text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-1 rounded-xl flex items-center justify-between font-mono">
               <span>Error Rate</span>
-              <span className="font-bold">{IS_DEMO ? '< 0.001% (demo)' : 'see /metrics (live)'}</span>
+              <span className="font-bold">{isDemo ? '< 0.001% (demo)' : 'see /metrics (live)'}</span>
             </div>
           </div>
 
@@ -184,7 +192,7 @@ export const TopologyView: React.FC = () => {
             </div>
             <div className="mt-3 text-[10px] text-indigo-300 bg-indigo-500/15 border border-indigo-500/30 px-2.5 py-1 rounded-xl flex items-center justify-between font-mono">
               <span>Parallelism</span>
-              <span className="font-bold">{IS_DEMO ? `${healthyWorkers.length}/20 workers (demo)` : `target ${liveWorkers?.target_workers ?? 20} / observed ${typeof liveWorkers?.observed_workers === 'number' ? liveWorkers.observed_workers : 'unknown'} (live)`}</span>
+              <span className="font-bold">{isDemo ? `${healthyWorkers.length}/20 workers (demo)` : `target ${liveWorkers?.target_workers ?? 20} / observed ${typeof liveWorkers?.observed_workers === 'number' ? liveWorkers.observed_workers : 'unknown'} (live)`}</span>
             </div>
           </div>
 
@@ -227,7 +235,7 @@ export const TopologyView: React.FC = () => {
       </div>
 
       {/* Bento Section 2: Real-Time Kafka Partition Visualizer */}
-      {IS_DEMO ? (
+      {isDemo ? (
       <KafkaPartitionVisualizer
         workers={workers}
         partitions={partitions}
@@ -243,7 +251,7 @@ export const TopologyView: React.FC = () => {
       )}
 
       {/* Bento Section 3: 20 Python Worker Nodes Grid */}
-      {!IS_DEMO && (
+      {!isDemo && (
         <div className="bg-[#111827] border border-emerald-500/40 rounded-3xl p-6 shadow-xl">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
             <Server className="w-4 h-4 text-emerald-400" />
@@ -272,7 +280,7 @@ export const TopologyView: React.FC = () => {
           )}
         </div>
       )}
-      {IS_DEMO && (
+      {isDemo && (
       <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
           <div>
@@ -281,7 +289,7 @@ export const TopologyView: React.FC = () => {
               ACTIVE PYTHON WORKER NODES (20 PROCESSES)
             </h3>
             <p className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5">
-              Each worker runs confluent-kafka consumer loops, per-partition RocksDB, and 5-min window accumulators {IS_DEMO ? '(DEMO simulation)' : '(LIVE: see /api/workers)'}
+              Each worker runs confluent-kafka consumer loops, per-partition RocksDB, and 5-min window accumulators {isDemo ? '(DEMO simulation)' : '(LIVE: see /api/workers)'}
             </p>
           </div>
 
@@ -392,7 +400,7 @@ export const TopologyView: React.FC = () => {
       )}
 
       {/* Selected Worker Detailed Modal / Drawer */}
-      {IS_DEMO && selectedWorker && (
+      {isDemo && selectedWorker && (
         <div className="bg-[#111827] border border-indigo-500/50 rounded-3xl p-6 shadow-2xl space-y-4">
           <div className="flex items-center justify-between border-b border-[#223348] pb-4">
             <div className="flex items-center gap-3.5">
@@ -418,12 +426,11 @@ export const TopologyView: React.FC = () => {
               </div>
             </div>
 
-            <button
+            <RollingTextButton
+              label="Close Details"
               onClick={() => setSelectedWorker(null)}
               className="text-xs px-4 py-1.5 rounded-xl bg-[#16202e] hover:bg-[#1f2d40] text-white font-semibold border border-[#223348] transition"
-            >
-              Close Details
-            </button>
+            />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">

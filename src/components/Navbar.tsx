@@ -22,7 +22,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
-import { streamApi, ConnectionStatus, IS_DEMO } from '../lib/api';
+import { streamApi, ConnectionStatus, useDemoMode, setDemoMode } from '../lib/api';
+import { RollingTextButton } from './ui/RollingTextButton';
 import { useLiveMetrics } from '../hooks/useLiveMetrics';
 import { StreamMetrics } from '../types/stream';
 
@@ -35,7 +36,10 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const [metrics, setMetrics] = useState<StreamMetrics>(streamSimulation.metrics);
   const [isRunning, setIsRunning] = useState<boolean>(streamSimulation.getIsRunning());
   const [rate, setRate] = useState<number>(streamSimulation.getRate());
-  const [streamMode, setStreamMode] = useState<'live' | 'demo'>(IS_DEMO ? 'demo' : 'live');
+  // Reactive app-wide mode: URL ?demo + 'sf:mode-change' event. The toggle
+  // writes it via setDemoMode() so the whole app switches without a reload.
+  const isDemoMode = useDemoMode();
+  const streamMode = isDemoMode ? 'demo' : 'live';
   const [apiLatency, setApiLatency] = useState<number>(streamApi.getLatency());
   const [connStatus, setConnStatus] = useState<ConnectionStatus>(streamSimulation.connectionStatus);
   const live = useLiveMetrics(2000);
@@ -111,15 +115,19 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   };
 
   const handleModeSwitch = (mode: 'live' | 'demo') => {
-    setStreamMode(mode);
+    // App-wide switch: persist to URL and broadcast so every panel re-renders
+    // in the new mode (App starts/stops the simulation loop on this event).
+    setDemoMode(mode === 'demo');
     if (mode === 'demo') {
       streamSimulation.setLiveBackendEnabled(false);
+      streamSimulation.startSimulation();
       streamSimulation.setRate(100000);
       setRate(100000);
+      setIsRunning(streamSimulation.getIsRunning());
     } else {
       streamSimulation.setLiveBackendEnabled(true);
-      streamSimulation.setRate(25000);
-      setRate(25000);
+      streamSimulation.stopSimulation();
+      setIsRunning(false);
     }
   };
 
@@ -195,7 +203,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const badge = getConnectionBadge();
 
   // LIVE ticker values: real observations only — never uninitialized gauge defaults.
-  const isDemoTicker = IS_DEMO || streamMode === 'demo';
+  const isDemoTicker = streamMode === 'demo';
   const backendReachable = backendHealth !== null || live.live;
   const kafkaDown =
     !!backendHealth && !!backendHealth.kafka && backendHealth.kafka !== 'available';
@@ -284,22 +292,20 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
 
             {/* Quick Switch Button */}
             <div className="ml-2 flex items-center bg-[#0b0f17] p-0.5 rounded-lg border border-[#223348] text-[10px]">
-              <button
+              <RollingTextButton
+                label="LIVE"
                 onClick={() => handleModeSwitch('live')}
                 className={`px-2 py-0.5 rounded transition font-bold ${
                   streamMode === 'live' ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white'
                 }`}
-              >
-                LIVE
-              </button>
-              <button
+              />
+              <RollingTextButton
+                label="DEMO"
                 onClick={() => handleModeSwitch('demo')}
                 className={`px-2 py-0.5 rounded transition font-bold ${
                   streamMode === 'demo' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-400 hover:text-white'
                 }`}
-              >
-                DEMO
-              </button>
+              />
             </div>
           </div>
 
@@ -339,52 +345,41 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
           >
             {/* Rate Selector */}
             <div className="flex items-center bg-[#16202e] p-1 rounded-xl border border-[#223348] text-xs">
-              <button
+              <RollingTextButton
+                label="10k"
                 onClick={() => handleRateChange(10000)}
                 className={`px-2 py-0.5 rounded text-xs font-mono transition ${
                   rate === 10000 ? 'bg-orange-500 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
                 }`}
-              >
-                10k
-              </button>
-              <button
+              />
+              <RollingTextButton
+                label="25k"
                 onClick={() => handleRateChange(25000)}
                 className={`px-2 py-0.5 rounded text-xs font-mono transition ${
                   rate === 25000 ? 'bg-orange-500 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
                 }`}
-              >
-                25k
-              </button>
-              <button
+              />
+              <RollingTextButton
+                label="⚡ 100k*"
                 onClick={() => handleRateChange(100000)}
                 className={`px-2 py-0.5 rounded text-xs font-mono transition ${
                   rate === 100000 ? 'bg-orange-500 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
                 }`}
                 title="Demo simulation rate target (not measured Kafka throughput)"
-              >
-                ⚡ 100k*
-              </button>
+              />
             </div>
 
             {/* Play / Pause Toggle */}
-            <button
+            <RollingTextButton
+              label={isRunning ? 'Pause' : 'Run Engine'}
+              icon={isRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
               onClick={handleToggle}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold shadow-md transition ${
                 isRunning
                   ? 'bg-[#16202e] hover:bg-[#1e2a3c] text-amber-300 border border-[#223348]'
                   : 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-[0_0_12px_rgba(16,185,129,0.4)]'
               }`}
-            >
-              {isRunning ? (
-                <>
-                  <Pause className="w-3.5 h-3.5" /> Pause
-                </>
-              ) : (
-                <>
-                  <Play className="w-3.5 h-3.5" /> Run Engine
-                </>
-              )}
-            </button>
+            />
           </div>
         </div>
       </div>
@@ -415,27 +410,28 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
-              <button
+              <RollingTextButton
                 key={tab.id}
+                label={tab.label}
+                icon={<Icon className={`w-3.5 h-3.5 ${isActive ? 'text-orange-400' : 'text-slate-400'}`} />}
+                suffix={
+                  tab.badge ? (
+                    <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-mono font-bold border ${
+                      tab.badge.includes('Gemini')
+                        ? 'bg-orange-500/20 text-orange-300 border-orange-500/40'
+                        : 'bg-[#16202e] text-slate-300 border-[#223348]'
+                    }`}>
+                      {tab.badge}
+                    </span>
+                  ) : undefined
+                }
                 onClick={() => setActiveTab(tab.id)}
                 className={`tab-button flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-xl transition whitespace-nowrap ${
                   isActive
                     ? 'bg-orange-500/20 text-orange-300 border border-orange-500/40 shadow-[0_0_12px_rgba(249,115,22,0.25)]'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-[#16202e]'
                 }`}
-              >
-                <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-orange-400' : 'text-slate-400'}`} />
-                <span>{tab.label}</span>
-                {tab.badge && (
-                  <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-mono font-bold border ${
-                    tab.badge.includes('Gemini')
-                      ? 'bg-orange-500/20 text-orange-300 border-orange-500/40'
-                      : 'bg-[#16202e] text-slate-300 border-[#223348]'
-                  }`}>
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
+              />
             );
           })}
         </div>

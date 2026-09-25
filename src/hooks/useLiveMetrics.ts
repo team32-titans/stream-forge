@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
-import { fetchMetrics, metricsWsUrl, IS_DEMO } from "../lib/api";
+import { fetchMetrics, metricsWsUrl, useDemoMode } from "../lib/api";
 
 export function useLiveMetrics(pollMs = 1000) {
   const [data, setData] = useState<{ counters: Record<string, number>; gauges: Record<string, number> } | null>(null);
   const [live, setLive] = useState(false);
+  const isDemo = useDemoMode();
 
   useEffect(() => {
-    if (IS_DEMO) return;
+    if (isDemo) {
+      setLive(false);
+      return;
+    }
     let ws: WebSocket | null = null;
     let poll: number | null = null;
     let closed = false;
@@ -56,7 +60,7 @@ export function useLiveMetrics(pollMs = 1000) {
       try { ws?.close(); } catch {}
       if (poll) clearInterval(poll);
     };
-  }, [pollMs]);
+  }, [pollMs, isDemo]);
 
-  return { data, live, isDemo: IS_DEMO };
+  return { data, live, isDemo };
 }

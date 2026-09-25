@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { streamSimulation } from './engine/simulationEngine';
-import { IS_DEMO } from './lib/api';
+import { useDemoMode } from './lib/api';
 import { Navbar } from './components/Navbar';
 import { TopologyView } from './components/TopologyView';
 import { ChaosStudio } from './components/ChaosStudio';
@@ -11,6 +11,7 @@ import { FleetMonitor } from './components/FleetMonitor';
 import { MetricsDashboard } from './components/MetricsDashboard';
 import { CodebaseExplorer } from './components/CodebaseExplorer';
 import { Member1Handbook } from './components/Member1Handbook';
+import { SplitReveal } from './components/ui/SplitReveal';
 
 const BOOT_TIME = Date.now();
 
@@ -26,19 +27,24 @@ function formatUptime(): string {
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('topology');
   const [, forceTick] = useState(0);
+  const isDemo = useDemoMode();
 
   useEffect(() => {
-    // DEMO MODE ONLY: start the in-browser simulation loop.
+    // DEMO MODE ONLY: run the in-browser simulation loop.
     // LIVE mode must NEVER run the simulation — it reads FastAPI/Kafka.
-    if (!IS_DEMO) return;
-    // Start distributed streaming simulation loop on mount (StrictMode-safe).
+    // Re-runs on mode toggle so the Navbar switch takes effect immediately.
+    if (!isDemo) {
+      streamSimulation.stopSimulation();
+      return;
+    }
+    // Start distributed streaming simulation loop (StrictMode-safe).
     streamSimulation.startSimulation();
     const t = window.setInterval(() => forceTick((x) => x + 1), 1000);
     return () => {
       window.clearInterval(t);
       streamSimulation.stopSimulation();
     };
-  }, []);
+  }, [isDemo]);
 
   return (
     <div className="app-shell min-h-screen bg-[#0a0c10] text-slate-100 flex flex-col antialiased selection:bg-orange-500 selection:text-white">
@@ -54,14 +60,21 @@ export default function App() {
         {/* Explicit mode banner: DEMO uses simulationEngine, LIVE uses FastAPI/Kafka */}
         <div
           className={`mb-3 px-4 py-2 rounded-xl border text-[11px] font-mono font-bold uppercase tracking-widest ${
-            IS_DEMO
+            isDemo
               ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
               : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
           }`}
         >
-          {IS_DEMO
-            ? 'DEMO MODE — simulated data (simulationEngine.ts). Add ?demo removal / LIVE backend for real Kafka.'
-            : 'LIVE MODE — reading FastAPI/Kafka runtime. Simulation disabled.'}
+          <SplitReveal
+            text={
+              isDemo
+                ? 'DEMO MODE — simulated data (simulationEngine.ts). Add ?demo removal / LIVE backend for real Kafka.'
+                : 'LIVE MODE — reading FastAPI/Kafka runtime. Simulation disabled.'
+            }
+            resetKey={activeTab}
+            delay={0.1}
+            stagger={0.015}
+          />
         </div>
         {activeTab === 'topology' && <TopologyView />}
         {activeTab === 'chaos' && <ChaosStudio />}
@@ -83,10 +96,10 @@ export default function App() {
             <span className="text-orange-400 font-semibold">Distributed Stateful Engine</span>
           </div>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Uptime: {formatUptime()} ({IS_DEMO ? 'demo session' : 'browser session — see /api/health for backend'})</span>
+            <span>Uptime: {formatUptime()} ({isDemo ? 'demo session' : 'browser session — see /api/health for backend'})</span>
             <span className="text-slate-600">•</span>
             <span className="text-slate-300">
-              Events: {IS_DEMO ? streamSimulation.metrics.totalEventsProcessed.toLocaleString() : 'see Metrics tab (LIVE)'}
+              Events: {isDemo ? streamSimulation.metrics.totalEventsProcessed.toLocaleString() : 'see Metrics tab (LIVE)'}
             </span>
           </div>
         </div>

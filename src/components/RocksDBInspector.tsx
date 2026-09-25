@@ -17,7 +17,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
-import { IS_DEMO } from '../lib/api';
+import { useDemoMode } from '../lib/api';
+import { SplitReveal } from './ui/SplitReveal';
 import { ChangelogRecord, WindowAggregate } from '../types/stream';
 
 export const RocksDBInspector: React.FC = () => {
@@ -29,9 +30,10 @@ export const RocksDBInspector: React.FC = () => {
   const [liveState, setLiveState] = useState<any>(null);
   const [searchKey, setSearchKey] = useState<string>('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const isDemo = useDemoMode();
 
   useEffect(() => {
-    if (!IS_DEMO) {
+    if (!isDemo) {
       let cancelled = false;
       const load = async () => {
         try {
@@ -57,7 +59,7 @@ export const RocksDBInspector: React.FC = () => {
       setAggregates(new Map(streamSimulation.activeWindowAggregates));
     });
     return unsubscribe;
-  }, []);
+  }, [isDemo]);
 
   const aggregateList: WindowAggregate[] = (Array.from(aggregates.values()) as WindowAggregate[]).filter(
     (agg) => agg.truckId.toLowerCase().includes(searchKey.toLowerCase())
@@ -71,14 +73,14 @@ export const RocksDBInspector: React.FC = () => {
     <div className="space-y-4">
       <div
         className={`px-4 py-2 rounded-xl border text-[11px] font-mono font-bold uppercase tracking-widest ${
-          IS_DEMO ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+          isDemo ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
         }`}
       >
-        {IS_DEMO
+        {isDemo
           ? 'DEMO MODE — simulated RocksDB/changelog below.'
           : 'LIVE MODE — real /api/state + /api/changelog below (simulation disabled).'}
       </div>
-      {!IS_DEMO && (
+      {!isDemo && (
         <div className="bg-[#111827] border border-emerald-500/40 rounded-3xl p-6 shadow-xl space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-widest text-white">Live state (partition 0) + changelog (partition 0)</h3>
           <pre className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] font-mono text-[11px] text-emerald-300 overflow-x-auto max-h-72 overflow-y-auto">
@@ -89,7 +91,7 @@ export const RocksDBInspector: React.FC = () => {
           </p>
         </div>
       )}
-      {IS_DEMO && (<>
+      {isDemo && (<>
       {/* Header Overview Bento Card (DEMO) */}
       <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -99,16 +101,21 @@ export const RocksDBInspector: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white tracking-tight">
-                  ROCKSDB LSM-TREE STATE STORE & CHANGELOG MIRROR
-                </h2>
+                <SplitReveal
+                  as="h2"
+                  text="ROCKSDB LSM-TREE STATE STORE & CHANGELOG MIRROR"
+                  className="text-base font-bold text-white tracking-tight"
+                />
                 <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#16202e] text-amber-300 font-mono font-bold border border-[#223348] uppercase tracking-wider">
                   Sub-ms Local State
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5">
-                Embedded C++ LSM-Tree engine running in-process on Python workers with write-ahead logs and changelog replication
-              </p>
+              <SplitReveal
+                text="Embedded C++ LSM-Tree engine running in-process on Python workers with write-ahead logs and changelog replication"
+                delay={0.3}
+                stagger={0.02}
+                className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5"
+              />
             </div>
           </div>
 

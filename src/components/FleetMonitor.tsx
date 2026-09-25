@@ -16,7 +16,9 @@ import {
   Zap,
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
-import { IS_DEMO } from '../lib/api';
+import { useDemoMode } from '../lib/api';
+import { RollingTextButton } from './ui/RollingTextButton';
+import { SplitReveal } from './ui/SplitReveal';
 import { TelemetryEvent, WindowAggregate } from '../types/stream';
 
 export const FleetMonitor: React.FC = () => {
@@ -30,9 +32,10 @@ export const FleetMonitor: React.FC = () => {
   const [selectedTruck, setSelectedTruck] = useState<string | null>(null);
   const [aiDiagnosis, setAiDiagnosis] = useState<any | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState<boolean>(false);
+  const isDemo = useDemoMode();
 
   useEffect(() => {
-    if (!IS_DEMO) {
+    if (!isDemo) {
       // LIVE mode: poll real backend telemetry, never simulation.
       let cancelled = false;
       const load = async () => {
@@ -63,7 +66,7 @@ export const FleetMonitor: React.FC = () => {
       setAggregates(new Map(streamSimulation.activeWindowAggregates));
     });
     return unsubscribe;
-  }, []);
+  }, [isDemo]);
 
   const filteredEvents = recentEvents.filter(
     (e) =>
@@ -111,17 +114,17 @@ export const FleetMonitor: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {!IS_DEMO && (
+      {!isDemo && (
         <div className="px-4 py-2 rounded-xl border text-[11px] font-mono font-bold uppercase tracking-widest bg-emerald-500/10 border-emerald-500/40 text-emerald-300">
           LIVE MODE — backend telemetry below ({liveStatus}). Simulation disabled.
         </div>
       )}
-      {IS_DEMO && (
+      {isDemo && (
         <div className="px-4 py-2 rounded-xl border text-[11px] font-mono font-bold uppercase tracking-widest bg-amber-500/10 border-amber-500/40 text-amber-300">
           DEMO MODE — simulated telemetry.
         </div>
       )}
-      {!IS_DEMO && (
+      {!isDemo && (
         <div className="bg-[#111827] border border-[#1e293b] rounded-2xl p-5 shadow-xl">
           <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200">Live ingested telemetry (FastAPI /api/telemetry)</h3>
           <p className="text-[11px] font-mono text-slate-400 mt-1">{liveStatus}</p>
@@ -152,7 +155,7 @@ export const FleetMonitor: React.FC = () => {
           </div>
         </div>
       )}
-      {IS_DEMO && (
+      {isDemo && (
       <>
       {/* Overview Header Bento Card */}
       <div className="bg-[#111827] border border-[#1e293b] rounded-2xl p-5 shadow-xl relative overflow-hidden">
@@ -163,16 +166,21 @@ export const FleetMonitor: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white tracking-tight">
-                  50,000 IOT FLEET TELEMETRY & COLD-CHAIN MONITOR
-                </h2>
+                <SplitReveal
+                  as="h2"
+                  text="50,000 IOT FLEET TELEMETRY & COLD-CHAIN MONITOR"
+                  className="text-base font-bold text-white tracking-tight"
+                />
                 <span className="text-[9px] px-2 py-0.5 rounded-md bg-[#16202e] text-orange-300 font-mono font-bold border border-[#223348] uppercase tracking-wider">
                   10s Cadence
                 </span>
               </div>
-              <p className="text-xs text-slate-400 uppercase tracking-wider mt-0.5 font-mono">
-                Demo temperature streams (simulation) — LIVE uses /api/telemetry
-              </p>
+              <SplitReveal
+                text="Demo temperature streams (simulation) — LIVE uses /api/telemetry"
+                delay={0.3}
+                stagger={0.02}
+                className="text-xs text-slate-400 uppercase tracking-wider mt-0.5 font-mono"
+              />
             </div>
           </div>
 
@@ -265,17 +273,16 @@ export const FleetMonitor: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-2.5">
-                        <button
+                        <RollingTextButton
+                          label="Diagnose"
+                          icon={<Brain className="w-3 h-3" />}
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedTruck(evt.truckId);
                             handleRunAiDiagnosis(evt.truckId, evt.temperature);
                           }}
                           className="px-2 py-0.5 rounded bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border border-orange-500/40 text-[10px] font-bold flex items-center gap-1 transition"
-                        >
-                          <Brain className="w-3 h-3" />
-                          Diagnose
-                        </button>
+                        />
                       </td>
                     </tr>
                   );
@@ -347,23 +354,13 @@ export const FleetMonitor: React.FC = () => {
 
                 {/* AI Root Cause Diagnostic Preview */}
                 <div className="pt-2">
-                  <button
+                  <RollingTextButton
+                    label={isDiagnosing ? 'Running AI Model Diagnostic...' : `Run AI Diagnostic on ${activeAgg.truckId}`}
+                    icon={isDiagnosing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
                     onClick={() => handleRunAiDiagnosis(activeAgg.truckId, activeAgg.avgTemp)}
                     disabled={isDiagnosing}
                     className="w-full py-2 px-3 rounded-xl bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/50 text-orange-300 text-xs font-bold transition flex items-center justify-center gap-2"
-                  >
-                    {isDiagnosing ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        Running AI Model Diagnostic...
-                      </>
-                    ) : (
-                      <>
-                        <Brain className="w-3.5 h-3.5" />
-                        Run AI Diagnostic on {activeAgg.truckId}
-                      </>
-                    )}
-                  </button>
+                  />
 
                   {aiDiagnosis && (
                     <div className="mt-2.5 bg-[#16202e] p-3 rounded-xl border border-[#223348] text-[11px] space-y-1.5">

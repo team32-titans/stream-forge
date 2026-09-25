@@ -19,7 +19,9 @@ import {
   Zap,
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
-import { IS_DEMO } from '../lib/api';
+import { useDemoMode } from '../lib/api';
+import { RollingTextButton } from './ui/RollingTextButton';
+import { SplitReveal } from './ui/SplitReveal';
 import { ChaosEvent, WorkerNode } from '../types/stream';
 
 export const ChaosStudio: React.FC = () => {
@@ -29,21 +31,22 @@ export const ChaosStudio: React.FC = () => {
   const [isKilling, setIsKilling] = useState<boolean>(false);
   const [selectedKillTarget, setSelectedKillTarget] = useState<string>('worker-04');
   const [liveResult, setLiveResult] = useState<any>(null);
+  const isDemo = useDemoMode();
 
   useEffect(() => {
-    if (!IS_DEMO) return; // LIVE uses backend endpoint, never simulation
+    if (!isDemo) return; // LIVE uses backend endpoint, never simulation
     const unsubscribe = streamSimulation.subscribe(() => {
       setWorkers([...streamSimulation.workers]);
       setCurrentChaos(streamSimulation.currentChaosEvent);
       setChaosHistory([...streamSimulation.chaosHistory]);
     });
     return unsubscribe;
-  }, []);
+  }, [isDemo]);
 
   const handleKillWorker = async (targetId: string) => {
     setIsKilling(true);
     try {
-      if (IS_DEMO) {
+      if (isDemo) {
         await streamSimulation.triggerKillWorker(targetId);
       } else {
         // LIVE: request the backend failure signal. The API does NOT kill
@@ -57,15 +60,15 @@ export const ChaosStudio: React.FC = () => {
   };
 
   const handleReviveWorker = (targetId: string) => {
-    if (IS_DEMO) streamSimulation.reviveWorker(targetId);
+    if (isDemo) streamSimulation.reviveWorker(targetId);
   };
 
   const handleLateData = () => {
-    if (IS_DEMO) streamSimulation.injectLateDataBurst();
+    if (isDemo) streamSimulation.injectLateDataBurst();
   };
 
   const handleColdChainSpike = () => {
-    if (IS_DEMO) streamSimulation.injectColdChainSpike();
+    if (isDemo) streamSimulation.injectColdChainSpike();
   };
 
   const worker4 = workers.find((w) => w.id === 'worker-04');
@@ -75,19 +78,19 @@ export const ChaosStudio: React.FC = () => {
     <div className="space-y-4">
       <div
         className={`px-4 py-2 rounded-xl border text-[11px] font-mono font-bold uppercase tracking-wider ${
-          IS_DEMO ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+          isDemo ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
         }`}
       >
-        {IS_DEMO
+        {isDemo
           ? 'DEMO CHAOS — simulationEngine trigger (no real workers harmed).'
           : 'LIVE CHAOS — backend failure-signal request only (external `docker stop <worker>` required for real termination).'}
       </div>
-      {!IS_DEMO && liveResult && (
+      {!isDemo && liveResult && (
         <pre className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] font-mono text-[11px] text-amber-300 overflow-x-auto">
           {JSON.stringify(liveResult, null, 2)}
         </pre>
       )}
-      {IS_DEMO && (<>
+      {isDemo && (<>
       {/* Header Banner Bento Card (DEMO simulation) */}
       <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -97,40 +100,37 @@ export const ChaosStudio: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white tracking-tight">
-                  CHAOS ENGINEERING & FAULT TOLERANCE
-                </h2>
+                <SplitReveal
+                  as="h2"
+                  text="CHAOS ENGINEERING & FAULT TOLERANCE"
+                  className="text-base font-bold text-white tracking-tight"
+                />
                 <span className="text-[9px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-mono font-bold border border-rose-500/30 uppercase tracking-wider">
                   Failover Milestone
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5">
-                {IS_DEMO
-                  ? 'Demo: crash simulated workers mid-window and replay the demo changelog mirror'
-                  : 'Live: request failure signals; real recovery observed via Kafka rebalance + changelog replay'}
-              </p>
+              <SplitReveal
+                text={
+                  isDemo
+                    ? 'Demo: crash simulated workers mid-window and replay the demo changelog mirror'
+                    : 'Live: request failure signals; real recovery observed via Kafka rebalance + changelog replay'
+                }
+                delay={0.3}
+                stagger={0.02}
+                className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5"
+              />
             </div>
           </div>
 
           {/* Core Action Trigger */}
           <div className="flex items-center gap-3">
-            <button
+            <RollingTextButton
+              label={isKilling ? 'Executing Failover...' : `KILL ${selectedKillTarget.toUpperCase()} (MID-STREAM)`}
+              icon={isKilling ? <RefreshCw className="w-4 h-4 animate-spin text-slate-950" /> : <Flame className="w-4 h-4 text-slate-950" />}
               onClick={() => handleKillWorker(selectedKillTarget)}
               disabled={isKilling || workers.find((w) => w.id === selectedKillTarget)?.status === 'CRASHED'}
               className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold text-xs shadow-[0_0_20px_rgba(244,63,94,0.4)] transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isKilling ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
-                  Executing Failover...
-                </>
-              ) : (
-                <>
-                  <Flame className="w-4 h-4 text-slate-950" />
-                  KILL {selectedKillTarget.toUpperCase()} (MID-STREAM)
-                </>
-              )}
-            </button>
+            />
           </div>
         </div>
       </div>
@@ -199,12 +199,12 @@ export const ChaosStudio: React.FC = () => {
             {worker4?.status === 'CRASHED' && (
               <div className="mt-4 pt-3.5 border-t border-rose-900/40 flex items-center justify-between">
                 <span className="text-[11px] text-rose-300 font-mono">Worker terminated via SIGKILL</span>
-                <button
+                <RollingTextButton
+                  label="Revive Node"
+                  icon={<Undo2 className="w-3.5 h-3.5 text-indigo-400" />}
                   onClick={() => handleReviveWorker('worker-04')}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1f2d40] hover:bg-[#273852] text-white text-xs font-semibold border border-[#223348] transition"
-                >
-                  <Undo2 className="w-3.5 h-3.5 text-indigo-400" /> Revive Node
-                </button>
+                />
               </div>
             )}
           </div>
@@ -311,12 +311,12 @@ export const ChaosStudio: React.FC = () => {
           </div>
 
           <div className="mt-5">
-            <button
+            <RollingTextButton
+              label="Blast 6 Delayed Telemetry Packets"
+              icon={<Zap className="w-3.5 h-3.5" />}
               onClick={handleLateData}
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold transition"
-            >
-              <Zap className="w-3.5 h-3.5" /> Blast 6 Delayed Telemetry Packets
-            </button>
+            />
           </div>
         </div>
 
@@ -335,12 +335,12 @@ export const ChaosStudio: React.FC = () => {
           </div>
 
           <div className="mt-5">
-            <button
+            <RollingTextButton
+              label="Trigger Thawing Temperature Spike"
+              icon={<Flame className="w-3.5 h-3.5" />}
               onClick={handleColdChainSpike}
               className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-xs font-bold transition"
-            >
-              <Flame className="w-3.5 h-3.5" /> Trigger Thawing Temperature Spike
-            </button>
+            />
           </div>
         </div>
       </div>
@@ -354,8 +354,10 @@ export const ChaosStudio: React.FC = () => {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2.5">
           {workers.map((w) => (
-            <button
+            <RollingTextButton
               key={w.id}
+              label={w.id}
+              rolling={false}
               onClick={() => setSelectedKillTarget(w.id)}
               className={`p-3 rounded-2xl border text-xs font-mono text-left transition flex items-center justify-between ${
                 selectedKillTarget === w.id
@@ -373,7 +375,7 @@ export const ChaosStudio: React.FC = () => {
               >
                 {w.status}
               </span>
-            </button>
+            </RollingTextButton>
           ))}
         </div>
         <p className="mt-3 text-[10px] font-mono text-slate-500 uppercase tracking-wider">
@@ -381,7 +383,7 @@ export const ChaosStudio: React.FC = () => {
         </p>
       </div>
       </>)}
-      {!IS_DEMO && (
+      {!isDemo && (
         <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
           <h4 className="text-xs font-bold uppercase tracking-widest text-white mb-2">LIVE chaos instructions</h4>
           <p className="text-xs text-slate-400 leading-relaxed">
@@ -397,13 +399,12 @@ export const ChaosStudio: React.FC = () => {
               onChange={(e) => setSelectedKillTarget(e.target.value)}
               className="bg-[#0a0c10] border border-[#223348] rounded-xl px-3 py-1.5 text-xs font-mono text-slate-200 w-48"
             />
-            <button
+            <RollingTextButton
+              label={isKilling ? 'Requesting…' : 'Send failure-signal request'}
               onClick={() => handleKillWorker(selectedKillTarget)}
               disabled={isKilling}
               className="px-4 py-2 rounded-2xl bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold text-xs disabled:opacity-50"
-            >
-              {isKilling ? 'Requesting…' : 'Send failure-signal request'}
-            </button>
+            />
           </div>
         </div>
       )}

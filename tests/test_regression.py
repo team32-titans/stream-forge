@@ -1250,11 +1250,33 @@ class TestFrontendLiveDemoSeparation:
 
     def test_demo_starts_sim_only_in_demo(self):
         src = self._read("src/App.tsx")
-        assert "IS_DEMO" in src
+        assert "useDemoMode" in src
+        assert "startSimulation" in src
+        assert "stopSimulation" in src
+
+    def test_demo_toggle_broadcasts_app_wide(self):
+        api = self._read("src/lib/api.ts")
+        assert "useDemoMode" in api
+        assert "setDemoMode" in api
+        assert "sf:mode-change" in api
+        nav = self._read("src/components/Navbar.tsx")
+        assert "setDemoMode" in nav
+        for rel in [
+            "src/App.tsx",
+            "src/components/TopologyView.tsx",
+            "src/components/FleetMonitor.tsx",
+            "src/components/MetricsDashboard.tsx",
+            "src/components/RocksDBInspector.tsx",
+            "src/components/ChaosStudio.tsx",
+            "src/hooks/useLiveMetrics.ts",
+        ]:
+            src = self._read(rel)
+            assert "useDemoMode" in src, f"{rel} must use reactive useDemoMode()"
+            assert "IS_DEMO" not in src.replace("useDemoMode", ""), f"{rel} must not use frozen IS_DEMO"
 
     def test_live_topology_no_false_claims(self):
         src = self._read("src/components/TopologyView.tsx")
-        assert "IS_DEMO" in src
+        assert "useDemoMode" in src
         assert "Exactly-Once" not in src
         assert "Murmur2" not in src
 
@@ -1275,12 +1297,12 @@ class TestFrontendLiveDemoSeparation:
 
     def test_metrics_live_source(self):
         src = self._read("src/components/MetricsDashboard.tsx")
-        assert "useLiveMetrics" in src and "IS_DEMO" in src
+        assert "useLiveMetrics" in src and "useDemoMode" in src
 
     def test_chaos_honest(self):
         src = self._read("src/components/ChaosStudio.tsx")
         assert "/api/chaos/kill-worker" in src
-        assert "IS_DEMO" in src
+        assert "useDemoMode" in src
 
     def test_no_simulation_leak_in_live_paths(self):
         for rel in [
@@ -1291,7 +1313,7 @@ class TestFrontendLiveDemoSeparation:
             "src/components/ChaosStudio.tsx",
         ]:
             src = self._read(rel)
-            assert "IS_DEMO" in src, f"{rel} must gate LIVE vs DEMO"
+            assert "useDemoMode" in src, f"{rel} must gate LIVE vs DEMO reactively"
 
     def test_vite_dev_proxies_api_to_fastapi(self):
         src = self._read("vite.config.ts")

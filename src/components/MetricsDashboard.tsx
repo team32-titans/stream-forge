@@ -25,7 +25,8 @@ import {
   Bar,
 } from 'recharts';
 import { streamSimulation } from '../engine/simulationEngine';
-import { IS_DEMO } from '../lib/api';
+import { useDemoMode } from '../lib/api';
+import { SplitReveal } from './ui/SplitReveal';
 import { useLiveMetrics } from '../hooks/useLiveMetrics';
 import { PartitionState, StreamMetrics } from '../types/stream';
 
@@ -33,12 +34,13 @@ export const MetricsDashboard: React.FC = () => {
   const [metrics, setMetrics] = useState<StreamMetrics>(streamSimulation.metrics);
   const [partitions, setPartitions] = useState<PartitionState[]>(streamSimulation.partitions);
   const [historyData, setHistoryData] = useState<{ time: string; throughput: number; latency: number }[]>([]);
+  const isDemo = useDemoMode();
   const live = useLiveMetrics(1000);
   const liveGauges = live.data?.gauges ?? {};
   const liveCounters = live.data?.counters ?? {};
 
   useEffect(() => {
-    if (!IS_DEMO) return; // LIVE mode reads backend via useLiveMetrics, never simulation
+    if (!isDemo) return; // LIVE mode reads backend via useLiveMetrics, never simulation
     const unsubscribe = streamSimulation.subscribe(() => {
       setMetrics({ ...streamSimulation.metrics });
       setPartitions([...streamSimulation.partitions]);
@@ -57,9 +59,9 @@ export const MetricsDashboard: React.FC = () => {
       });
     });
     return unsubscribe;
-  }, []);
+  }, [isDemo]);
 
-  const rawPrometheusText = IS_DEMO ? `# HELP streamforge_events_processed_total Total IoT events processed
+  const rawPrometheusText = isDemo ? `# HELP streamforge_events_processed_total Total IoT events processed
 # TYPE streamforge_events_processed_total counter
 streamforge_events_processed_total{service="streamforge_engine"} ${metrics.totalEventsProcessed}
 
@@ -74,7 +76,7 @@ ${live.live ? JSON.stringify({ counters: liveCounters, gauges: liveGauges }, nul
 `;
 
   // Display values: DEMO from simulation, LIVE from backend (or Unavailable).
-  const disp = IS_DEMO
+  const disp = isDemo
     ? {
         throughput: metrics.currentThroughput,
         peak: metrics.peakThroughput,
@@ -103,7 +105,7 @@ ${live.live ? JSON.stringify({ counters: liveCounters, gauges: liveGauges }, nul
 
   return (
     <div className="space-y-4">
-      {!IS_DEMO && (
+      {!isDemo && (
         <div className="px-4 py-2 rounded-xl border text-[11px] font-mono font-bold uppercase tracking-widest bg-emerald-500/10 border-emerald-500/40 text-emerald-300">
           LIVE MODE — charts below read FastAPI /metrics{live.live ? '' : ' (Waiting for backend…)'}
         </div>
@@ -117,16 +119,21 @@ ${live.live ? JSON.stringify({ counters: liveCounters, gauges: liveGauges }, nul
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white tracking-tight">
-                  PROMETHEUS & GRAFANA PERFORMANCE METRICS
-                </h2>
+                <SplitReveal
+                  as="h2"
+                  text="PROMETHEUS & GRAFANA PERFORMANCE METRICS"
+                  className="text-base font-bold text-white tracking-tight"
+                />
                 <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#16202e] text-indigo-300 font-mono font-bold border border-[#223348] uppercase tracking-wider">
                   100k evt/s target*
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5">
-                Real-time latency histograms, partition consumer lag, RocksDB memory utilization, and scrape endpoints
-              </p>
+              <SplitReveal
+                text="Real-time latency histograms, partition consumer lag, RocksDB memory utilization, and scrape endpoints"
+                delay={0.3}
+                stagger={0.02}
+                className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5"
+              />
             </div>
           </div>
         </div>
@@ -142,10 +149,10 @@ ${live.live ? JSON.stringify({ counters: liveCounters, gauges: liveGauges }, nul
           </div>
           <div className="text-2xl font-mono font-bold text-white mt-2">
             {fmt(disp.throughput)}{' '}
-            <span className="text-xs text-slate-400 font-normal">evt/s{IS_DEMO ? ' (demo)' : ' (live)'}</span>
+            <span className="text-xs text-slate-400 font-normal">evt/s{isDemo ? ' (demo)' : ' (live)'}</span>
           </div>
           <div className="text-[11px] text-emerald-400 mt-2 flex items-center gap-1 font-mono">
-            <ArrowUpRight className="w-3.5 h-3.5" /> Peak: {IS_DEMO ? `${fmt(disp.peak)} evt/s (demo)` : 'see Prometheus (live)'}
+            <ArrowUpRight className="w-3.5 h-3.5" /> Peak: {isDemo ? `${fmt(disp.peak)} evt/s (demo)` : 'see Prometheus (live)'}
           </div>
         </div>
 
@@ -157,10 +164,10 @@ ${live.live ? JSON.stringify({ counters: liveCounters, gauges: liveGauges }, nul
           </div>
           <div className="text-2xl font-mono font-bold text-indigo-300 mt-2">
             {fmt(disp.p99)}{' '}
-            <span className="text-xs text-slate-400 font-normal">ms{IS_DEMO ? '' : ' (live)'}</span>
+            <span className="text-xs text-slate-400 font-normal">ms{isDemo ? '' : ' (live)'}</span>
           </div>
           <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1 font-mono">
-            <span>{IS_DEMO ? `p50: ${metrics.averageLatencyMs}ms • p95: ${metrics.p95LatencyMs}ms` : 'p50/p95: see /metrics histogram (live)'}</span>
+            <span>{isDemo ? `p50: ${metrics.averageLatencyMs}ms • p95: ${metrics.p95LatencyMs}ms` : 'p50/p95: see /metrics histogram (live)'}</span>
           </div>
         </div>
 
@@ -172,10 +179,10 @@ ${live.live ? JSON.stringify({ counters: liveCounters, gauges: liveGauges }, nul
           </div>
           <div className="text-2xl font-mono font-bold text-amber-300 mt-2">
             {fmt(disp.rocksMb)}{' '}
-            <span className="text-xs text-slate-400 font-normal">MB{IS_DEMO ? '' : ' (live)'}</span>
+            <span className="text-xs text-slate-400 font-normal">MB{isDemo ? '' : ' (live)'}</span>
           </div>
           <div className="text-[11px] text-emerald-400 mt-2 font-mono">
-            {IS_DEMO ? 'Hit Ratio: 99.2% in RAM (demo)' : 'Hit ratio: see worker internals (live)'}
+            {isDemo ? 'Hit Ratio: 99.2% in RAM (demo)' : 'Hit ratio: see worker internals (live)'}
           </div>
         </div>
 
@@ -187,7 +194,7 @@ ${live.live ? JSON.stringify({ counters: liveCounters, gauges: liveGauges }, nul
           </div>
           <div className="text-2xl font-mono font-bold text-emerald-400 mt-2">
             {fmt(disp.lag)}{' '}
-            <span className="text-xs text-slate-400 font-normal">records{IS_DEMO ? '' : ' (-1 = unavailable)'}</span>
+            <span className="text-xs text-slate-400 font-normal">records{isDemo ? '' : ' (-1 = unavailable)'}</span>
           </div>
           <div className="text-[11px] text-slate-400 mt-2 font-mono">
             {disp.lagLabel}

@@ -4,6 +4,7 @@
  * Handles bidirectional WebSocket connections with automated reconnect,
  * protocol detection (wss:// vs ws://), and seamless REST/FastAPI proxy fallback.
  */
+import { useEffect, useState } from 'react';
 
 export type ConnectionStatus =
   | 'CONNECTED_WS'
@@ -405,10 +406,46 @@ export class StreamApiClient {
 export const streamApi = new StreamApiClient();
 
 // --- Compatibility helpers for hooks (LIVE vs DEMO) ---
-export const IS_DEMO =
-  typeof window !== 'undefined' &&
-  (new URLSearchParams(window.location.search).has('demo') ||
-    (import.meta as any)?.env?.VITE_DEMO_MODE === 'true');
+// Mode is reactive: the Navbar LIVE/DEMO toggle updates the URL (?demo) and
+// broadcasts 'sf:mode-change', so every component switches without a reload.
+export function getDemoMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    new URLSearchParams(window.location.search).has('demo') ||
+    (import.meta as any)?.env?.VITE_DEMO_MODE === 'true'
+  );
+}
+
+// Frozen initial value (kept for backward compat); prefer useDemoMode() in components.
+export const IS_DEMO = getDemoMode();
+
+export function setDemoMode(on: boolean): void {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  if (on) {
+    if (!url.searchParams.has('demo')) url.searchParams.set('demo', '');
+  } else {
+    url.searchParams.delete('demo');
+  }
+  window.history.replaceState(null, '', url.toString());
+  window.dispatchEvent(new CustomEvent('sf:mode-change'));
+}
+
+export function useDemoMode(): boolean {
+  const [demo, setDemo] = useState<boolean>(getDemoMode());
+  useEffect(() => {
+    const handler = () => setDemo(getDemoMode());
+    window.addEventListener('sf:mode-change', handler);
+    window.addEventListener('popstate', handler);
+    // Sync in case the URL changed before mount.
+    setDemo(getDemoMode());
+    return () => {
+      window.removeEventListener('sf:mode-change', handler);
+      window.removeEventListener('popstate', handler);
+    };
+  }, []);
+  return demo;
+}
 
 export function metricsWsUrl(): string {
   if (typeof window === 'undefined') return 'ws://localhost:8000/ws/metrics';
