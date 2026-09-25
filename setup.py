@@ -11,7 +11,6 @@ setup(
         "confluent-kafka>=2.4.0",
         "typing-extensions>=4.8.0",
     ],
-
     entry_points={
         "console_scripts": [
             "streamforge=streamforge.cli:main",

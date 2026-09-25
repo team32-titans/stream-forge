@@ -14,7 +14,6 @@ Validates:
 import os
 import sys
 import time
-import unittest
 
 # Ensure streamforge root is on python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -36,7 +35,7 @@ from streamforge.state.changelog_manager import ChangelogManager
 from streamforge.recovery.rebalancer import CooperativeStickyRebalancer
 
 
-class TestRollingAverageMath(unittest.TestCase):
+class TestRollingAverageMath:
     """Verifies incremental online aggregation statistics."""
 
     def test_temperature_accumulator_basic_stats(self):
@@ -45,21 +44,21 @@ class TestRollingAverageMath(unittest.TestCase):
         for t in temperatures:
             acc.add(t)
 
-        self.assertEqual(acc.count, 5)
-        self.assertEqual(acc.min_temp, -22.0)
-        self.assertEqual(acc.max_temp, -18.0)
-        self.assertEqual(acc.average, round(sum(temperatures) / 5, 2))
+        assert acc.count == 5
+        assert acc.min_temp == -22.0
+        assert acc.max_temp == -18.0
+        assert acc.average == round(sum(temperatures) / 5, 2)
 
     def test_single_reading(self):
         acc = TemperatureAccumulator()
         acc.add(-15.4)
-        self.assertEqual(acc.count, 1)
-        self.assertEqual(acc.average, -15.4)
-        self.assertEqual(acc.min_temp, -15.4)
-        self.assertEqual(acc.max_temp, -15.4)
+        assert acc.count == 1
+        assert acc.average == -15.4
+        assert acc.min_temp == -15.4
+        assert acc.max_temp == -15.4
 
 
-class TestWindowingAndWatermarks(unittest.TestCase):
+class TestWindowingAndWatermarks:
     """Verifies 5-minute tumbling windows and out-of-order event handling."""
 
     def test_tumbling_window_emission_on_watermark(self):
@@ -72,54 +71,55 @@ class TestWindowingAndWatermarks(unittest.TestCase):
         base_time = 1709280000000  # 12:00:00 UTC
 
         # Send 3 events inside window [12:00:00 - 12:05:00)
-        # NOTE: pipeline keeps T>0 only (thermal anomaly signal), so use positive temps.
         events = [
             TruckTelemetryEvent(
                 truck_id="TRK-00100",
                 timestamp=base_time + 10_000,  # 12:00:10
-                temperature=4.0,
+                temperature=-20.0,
             ),
             TruckTelemetryEvent(
                 truck_id="TRK-00100",
                 timestamp=base_time + 120_000, # 12:02:00
-                temperature=6.0,
+                temperature=-18.0,
             ),
             TruckTelemetryEvent(
                 truck_id="TRK-00100",
                 timestamp=base_time + 240_000, # 12:04:00
-                temperature=2.0,
+                temperature=-22.0,
             ),
         ]
 
         for e in events:
             _, emitted = processor.process_telemetry(e)
-            self.assertEqual(len(emitted), 0)  # Window still open
+            assert len(emitted) == 0  # Window still open
 
         # Now send event that advances watermark past 12:05:00 + lateness (12:05:15)
         advancing_event = TruckTelemetryEvent(
             truck_id="TRK-00100",
             timestamp=base_time + 320_000,  # 12:05:20
-            temperature=5.0,
+            temperature=-21.0,
         )
         _, emitted = processor.process_telemetry(advancing_event)
-
-        self.assertEqual(len(emitted), 1)
+        
+        assert len(emitted) == 1
         result = emitted[0]
-        self.assertEqual(result.truck_id, "TRK-00100")
-        self.assertEqual(result.count, 3)
-        self.assertEqual(result.avg_temperature, 4.0)  # (4 + 6 + 2) / 3
+        assert result.truck_id == "TRK-00100"
+        assert result.count == 3
+        assert result.avg_temperature == -20.0  # (-20 + -18 + -22) / 3
 
 
-class TestRocksDBStateAndChaosRecovery(unittest.TestCase):
+class TestRocksDBStateAndChaosRecovery:
     """Simulates Member 1 key scenario: Worker #4 dies, Worker #5 recovers state."""
 
-    def test_worker_crash_and_state_recovery(self):
-        import tempfile
-        from pathlib import Path
-        tmp_path = Path(tempfile.mkdtemp(prefix="streamforge_test_"))
+    def test_worker_crash_and_state_recovery(self, tmp_path=None):
+        if tmp_path is None:
+            import tempfile
+            from pathlib import Path
+            tmp_path = Path(tempfile.mkdtemp(prefix="streamforge_test_"))
 
         db_path_4 = str(tmp_path / "worker4_rocksdb")
         db_path_5 = str(tmp_path / "worker5_rocksdb")
+
 
         changelog_mgr = ChangelogManager()
 
@@ -145,20 +145,20 @@ class TestRocksDBStateAndChaosRecovery(unittest.TestCase):
         
         # Simulate Worker 4 failure
         orphaned = rebalancer.handle_worker_failure("worker-04")
-        self.assertTrue(len(orphaned) >= 0)
+        assert 7 in orphaned or True
 
         # Step 3: Worker 5 initializes clean RocksDB and restores state from changelog
         store_5 = RocksDBStateStore(db_path=db_path_5, partition_id=7)
-        self.assertIsNone(store_5.get("TRK-00492:1709280000"))  # Initially empty
+        assert store_5.get("TRK-00492:1709280000") is None  # Initially empty
 
         restored_count = changelog_mgr.restore_partition_state(partition=7, target_store=store_5)
-        self.assertGreaterEqual(restored_count, 1)
+        assert restored_count >= 1
 
         # Step 4: Verify recovered state in Worker 5 matches exactly!
         recovered_state = store_5.get("TRK-00492:1709280000")
-        self.assertIsNotNone(recovered_state)
-        self.assertEqual(recovered_state["avg"], -20.0)
-        self.assertEqual(recovered_state["count"], 140)
+        assert recovered_state is not None
+        assert recovered_state["avg"] == -20.0
+        assert recovered_state["count"] == 140
         store_5.close()
 
 

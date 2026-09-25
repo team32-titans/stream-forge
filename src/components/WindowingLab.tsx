@@ -53,7 +53,7 @@ export const WindowingLab: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* Header Banner Bento Card */}
-      <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl relative overflow-hidden">
+      <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.3)]">
@@ -64,7 +64,7 @@ export const WindowingLab: React.FC = () => {
                 <h2 className="text-base font-bold text-white tracking-tight">
                   5-MINUTE WINDOWING & WATERMARK MATHEMATICAL ENGINE
                 </h2>
-                <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#16202e] text-orange-400 font-mono font-bold border border-[#223348] uppercase tracking-wider">
+                <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-800 text-orange-400 font-mono font-bold border border-slate-700 uppercase tracking-wider">
                   Member 1 Core
                 </span>
               </div>
@@ -79,17 +79,17 @@ export const WindowingLab: React.FC = () => {
       {/* Interactive Step-by-Step Mathematical Aggregator Sandbox */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Left: Interactive Input & Step breakdown */}
-        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl space-y-4">
-          <div className="flex items-center justify-between border-b border-[#223348] pb-3">
+        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-700/50 pb-3">
             <div className="flex items-center gap-2">
               <Calculator className="w-4 h-4 text-indigo-400" />
-              <h3 className="text-xs font-bold uppercase tracking-widest text-white">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-200">
                 Live 5-Min Window (Welford O(1) Algorithm)
               </h3>
             </div>
             <button
               onClick={handleReset}
-              className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 font-mono uppercase tracking-wider"
+              className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1 font-mono uppercase tracking-wider"
             >
               <RefreshCw className="w-3 h-3" /> Reset
             </button>
@@ -104,7 +104,7 @@ export const WindowingLab: React.FC = () => {
               value={newReading}
               onChange={(e) => setNewReading(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAddReading()}
-              className="flex-1 bg-[#0a0c10] border border-[#223348] rounded-2xl px-4 py-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
+              className="flex-1 bg-[#05070a] border border-slate-700/50 rounded-2xl px-4 py-2.5 text-xs text-slate-200 font-mono focus:outline-none focus:border-indigo-500"
             />
             <button
               onClick={handleAddReading}
@@ -123,7 +123,7 @@ export const WindowingLab: React.FC = () => {
               {testReadings.map((r, i) => (
                 <span
                   key={i}
-                  className="px-2.5 py-1 rounded-xl bg-[#0a0c10] border border-[#223348] text-xs font-mono text-indigo-300 flex items-center gap-1"
+                  className="px-2.5 py-1 rounded-xl bg-[#05070a] border border-slate-700/60 text-xs font-mono text-indigo-300 flex items-center gap-1"
                 >
                   <span className="text-[9px] text-slate-500">#{i + 1}:</span>
                   {r.toFixed(1)}°C
@@ -133,7 +133,7 @@ export const WindowingLab: React.FC = () => {
           </div>
 
           {/* Step-by-Step Math Formula Breakdown Bento Tile */}
-          <div className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] space-y-2.5 font-mono text-xs text-slate-300">
+          <div className="bg-[#05070a] p-4 rounded-2xl border border-slate-700/50 space-y-2.5 font-mono text-xs text-slate-300">
             <div className="text-indigo-400 font-bold text-[11px] flex items-center gap-1.5 uppercase tracking-wider">
               <Sparkles className="w-3.5 h-3.5" /> Mathematical Verification:
             </div>
@@ -156,12 +156,12 @@ export const WindowingLab: React.FC = () => {
         </div>
 
         {/* Right: Windowing Strategies & Watermarking Theory */}
-        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl space-y-4 flex flex-col justify-between">
+        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl space-y-4 flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between border-b border-[#223348] pb-3 mb-4">
+            <div className="flex items-center justify-between border-b border-slate-700/50 pb-3 mb-4">
               <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-amber-400" />
-                <h3 className="text-xs font-bold uppercase tracking-widest text-white">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-slate-200">
                   Windowing Strategy & Out-of-Order Watermark
                 </h3>
               </div>
@@ -174,7 +174,7 @@ export const WindowingLab: React.FC = () => {
                 className={`p-4 rounded-2xl border text-xs text-left transition ${
                   windowType === 'tumbling'
                     ? 'bg-indigo-600/20 border-indigo-500 text-indigo-200 font-bold shadow-[0_0_15px_rgba(99,102,241,0.2)]'
-                    : 'bg-[#0a0c10] border-[#223348] text-slate-400 hover:border-slate-500'
+                    : 'bg-[#05070a] border-slate-700/50 text-slate-400 hover:border-slate-600'
                 }`}
               >
                 <div className="text-sm font-bold text-white mb-1">Tumbling Window</div>
@@ -188,7 +188,7 @@ export const WindowingLab: React.FC = () => {
                 className={`p-4 rounded-2xl border text-xs text-left transition ${
                   windowType === 'hopping'
                     ? 'bg-indigo-600/20 border-indigo-500 text-indigo-200 font-bold shadow-[0_0_15px_rgba(99,102,241,0.2)]'
-                    : 'bg-[#0a0c10] border-[#223348] text-slate-400 hover:border-slate-500'
+                    : 'bg-[#05070a] border-slate-700/50 text-slate-400 hover:border-slate-600'
                 }`}
               >
                 <div className="text-sm font-bold text-white mb-1">Hopping Window</div>
@@ -199,15 +199,15 @@ export const WindowingLab: React.FC = () => {
             </div>
 
             {/* Watermark Details */}
-            <div className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] space-y-2.5 text-xs">
-              <div className="font-bold text-white flex items-center justify-between font-mono">
+            <div className="bg-[#05070a] p-4 rounded-2xl border border-slate-700/50 space-y-2.5 text-xs">
+              <div className="font-bold text-slate-300 flex items-center justify-between font-mono">
                 <span className="font-sans">Bounded Watermark:</span>
                 <span className="text-indigo-400">W(t) = Max(EventTime) - 15s</span>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
                 When a reading timestamp exceeds the current watermark, the window remains open. Once the watermark crosses <code>window_end</code>, the state is finalized and emitted to the output topic.
               </p>
-              <div className="pt-2 border-t border-[#223348] flex justify-between text-[11px] text-slate-400 font-mono">
+              <div className="pt-2 border-t border-slate-800 flex justify-between text-[11px] text-slate-400 font-mono">
                 <span>Allowed Lateness Budget:</span>
                 <span className="text-amber-300 font-bold">15,000 ms</span>
               </div>

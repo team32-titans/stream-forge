@@ -79,7 +79,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
   return (
     <div className="space-y-4">
       {/* Header Bento Card */}
-      <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl relative overflow-hidden">
+      <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.3)]">
@@ -90,7 +90,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
                 <h2 className="text-base font-bold text-white tracking-tight">
                   PROMETHEUS & GRAFANA PERFORMANCE METRICS
                 </h2>
-                <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#16202e] text-indigo-300 font-mono font-bold border border-[#223348] uppercase tracking-wider">
+                <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-800 text-indigo-300 font-mono font-bold border border-slate-700 uppercase tracking-wider">
                   100k evt/s Ready
                 </span>
               </div>
@@ -105,7 +105,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
       {/* Top 4 KPI Cards (Bento Metric Tiles) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* KPI 1 */}
-        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-5 shadow-xl">
+        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-5 shadow-xl">
           <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between tracking-wider">
             <span>Throughput Rate</span>
             <Activity className="w-4 h-4 text-indigo-400" />
@@ -120,7 +120,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
         </div>
 
         {/* KPI 2 */}
-        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-5 shadow-xl">
+        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-5 shadow-xl">
           <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between tracking-wider">
             <span>p99 Latency</span>
             <Clock className="w-4 h-4 text-indigo-400" />
@@ -135,7 +135,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
         </div>
 
         {/* KPI 3 */}
-        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-5 shadow-xl">
+        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-5 shadow-xl">
           <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between tracking-wider">
             <span>RocksDB Memory</span>
             <Database className="w-4 h-4 text-amber-400" />
@@ -150,7 +150,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
         </div>
 
         {/* KPI 4 */}
-        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-5 shadow-xl">
+        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-5 shadow-xl">
           <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center justify-between tracking-wider">
             <span>Total Kafka Lag</span>
             <Layers className="w-4 h-4 text-emerald-400" />
@@ -168,9 +168,9 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
       {/* Live Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Real-time Throughput Area Chart */}
-        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
-          <div className="flex items-center justify-between mb-4 border-b border-[#223348] pb-3">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
+        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl">
+          <div className="flex items-center justify-between mb-4 border-b border-slate-700/50 pb-3">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-200 flex items-center gap-2">
               <Activity className="w-4 h-4 text-indigo-400" />
               Throughput (events/sec)
             </h3>
@@ -189,7 +189,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
                 <XAxis dataKey="time" stroke="#64748b" fontSize={10} tickLine={false} />
                 <YAxis stroke="#64748b" fontSize={10} tickLine={false} domain={[0, 120000]} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0a0c10', borderColor: '#223348', borderRadius: '16px' }}
+                  contentStyle={{ backgroundColor: '#05070a', borderColor: '#334155', borderRadius: '16px' }}
                 />
                 <Area
                   type="monotone"
@@ -205,9 +205,9 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
         </div>
 
         {/* Partition Lag Distribution Bar Chart */}
-        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
-          <div className="flex items-center justify-between mb-4 border-b border-[#223348] pb-3">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
+        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl">
+          <div className="flex items-center justify-between mb-4 border-b border-slate-700/50 pb-3">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-200 flex items-center gap-2">
               <Layers className="w-4 h-4 text-emerald-400" />
               Kafka Consumer Lag per Partition (P0 – P31)
             </h3>
@@ -220,7 +220,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
                 <XAxis dataKey="partitionId" stroke="#64748b" fontSize={10} tickFormatter={(val) => `P${val}`} />
                 <YAxis stroke="#64748b" fontSize={10} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#0a0c10', borderColor: '#223348', borderRadius: '16px' }}
+                  contentStyle={{ backgroundColor: '#05070a', borderColor: '#334155', borderRadius: '16px' }}
                 />
                 <Bar dataKey="lag" fill="#10b981" radius={[4, 4, 0, 0]} />
               </BarChart>
@@ -230,11 +230,11 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
       </div>
 
       {/* Raw Prometheus Text Exporter Endpoint */}
-      <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
-        <div className="flex items-center justify-between mb-3.5 border-b border-[#223348] pb-3">
+      <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl">
+        <div className="flex items-center justify-between mb-3.5 border-b border-slate-700/50 pb-3">
           <div className="flex items-center gap-2">
             <Server className="w-4 h-4 text-indigo-400" />
-            <h3 className="text-xs font-bold uppercase tracking-widest text-white">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-200">
               Prometheus HTTP Scrape Endpoint (GET /metrics)
             </h3>
           </div>
@@ -243,7 +243,7 @@ streamforge_rocksdb_memory_mb{engine="rocksdb_lsm"} ${metrics.rocksDbTotalMemory
           </span>
         </div>
 
-        <pre className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] font-mono text-xs text-indigo-300 overflow-x-auto">
+        <pre className="bg-[#05070a] p-4 rounded-2xl border border-slate-700/50 font-mono text-xs text-indigo-300 overflow-x-auto">
           {rawPrometheusText}
         </pre>
       </div>

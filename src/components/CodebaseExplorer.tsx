@@ -209,7 +209,7 @@ export const CodebaseExplorer: React.FC = () => {
   return (
     <div className="space-y-4">
       {/* Header Banner Bento Card */}
-      <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl relative overflow-hidden">
+      <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center shadow-[0_0_15px_rgba(99,102,241,0.3)]">
@@ -223,7 +223,7 @@ export const CodebaseExplorer: React.FC = () => {
                 <span className="text-[9px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono font-bold border border-emerald-500/30 uppercase tracking-wider">
                   100% Python Standard Library Ready
                 </span>
-                <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#16202e] text-indigo-300 font-mono font-bold border border-[#223348] uppercase tracking-wider">
+                <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-800 text-indigo-300 font-mono font-bold border border-slate-700 uppercase tracking-wider">
                   Python 3.9 - 3.12+
                 </span>
               </div>
@@ -235,7 +235,7 @@ export const CodebaseExplorer: React.FC = () => {
 
           <div className="flex items-center gap-2.5">
             {/* View Mode Toggle */}
-            <div className="flex items-center bg-[#0a0c10] border border-[#223348] rounded-2xl p-1 text-xs">
+            <div className="flex items-center bg-[#05070a] border border-slate-700/60 rounded-2xl p-1 text-xs">
               <button
                 onClick={() => setActiveTab('code')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition cursor-pointer ${
@@ -267,7 +267,7 @@ export const CodebaseExplorer: React.FC = () => {
 
         {/* Category Filters (Visible in Code View) */}
         {activeTab === 'code' && (
-          <div className="flex items-center gap-2 overflow-x-auto mt-4 pt-3.5 border-t border-[#223348] scrollbar-none">
+          <div className="flex items-center gap-2 overflow-x-auto mt-4 pt-3.5 border-t border-slate-700/50 scrollbar-none">
             {categories.map((cat) => (
               <button
                 key={cat}
@@ -275,7 +275,7 @@ export const CodebaseExplorer: React.FC = () => {
                 className={`px-3.5 py-1.5 text-xs rounded-2xl transition whitespace-nowrap uppercase tracking-wider font-semibold cursor-pointer ${
                   selectedCategory === cat
                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/40'
-                    : 'bg-[#0a0c10] border border-[#223348] text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                    : 'bg-[#05070a] border border-slate-700/50 text-slate-400 hover:text-slate-200 hover:border-slate-600'
                 }`}
               >
                 {cat}
@@ -289,13 +289,13 @@ export const CodebaseExplorer: React.FC = () => {
         /* Main Code Viewer Layout */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           {/* Left: File Tree (4 Cols) */}
-          <div className="lg:col-span-4 bg-[#111827] border border-[#1e293b] rounded-3xl p-5 shadow-xl space-y-3">
-            <div className="text-xs font-bold uppercase tracking-widest text-white flex items-center justify-between border-b border-[#223348] pb-2.5">
+          <div className="lg:col-span-4 bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-5 shadow-xl space-y-3">
+            <div className="text-xs font-bold uppercase tracking-widest text-slate-300 flex items-center justify-between border-b border-slate-700/50 pb-2.5">
               <div className="flex items-center gap-2">
                 <Folder className="w-4 h-4 text-indigo-400" />
                 <span>Python Repository Tree</span>
               </div>
-              <span className="text-[10px] text-slate-400 font-mono">{filteredFiles.length} files</span>
+              <span className="text-[10px] text-slate-500 font-mono">{filteredFiles.length} files</span>
             </div>
 
             <div className="space-y-2 max-h-[580px] overflow-y-auto pr-1">
@@ -308,15 +308,15 @@ export const CodebaseExplorer: React.FC = () => {
                     className={`p-3.5 rounded-2xl border text-xs cursor-pointer transition ${
                       isSelected
                         ? 'bg-indigo-600/20 border-indigo-500/60 text-white shadow-lg shadow-indigo-950/40'
-                        : 'bg-[#0a0c10] border-[#223348] text-slate-300 hover:border-slate-500'
+                        : 'bg-[#05070a] border-slate-700/50 text-slate-300 hover:border-slate-600'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 font-mono font-bold text-white mb-1">
+                    <div className="flex items-center justify-between gap-2 font-mono font-bold text-slate-200 mb-1">
                       <div className="flex items-center gap-2 truncate">
                         <FileCode className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-indigo-400' : 'text-slate-500'}`} />
                         <span className="truncate">{file.name}</span>
                       </div>
-                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#16202e] text-slate-300 border border-[#223348] shrink-0">
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 shrink-0">
                         {file.category.split(' ')[0]}
                       </span>
                     </div>
@@ -325,7 +325,7 @@ export const CodebaseExplorer: React.FC = () => {
                       {file.oopPatterns.slice(0, 3).map((pat, idx) => (
                         <span
                           key={idx}
-                          className="text-[9px] px-2 py-0.5 rounded-full bg-[#16202e] text-indigo-300 font-mono border border-[#223348]"
+                          className="text-[9px] px-2 py-0.5 rounded-full bg-slate-800 text-indigo-300 font-mono border border-slate-700"
                         >
                           {pat}
                         </span>
@@ -338,10 +338,10 @@ export const CodebaseExplorer: React.FC = () => {
           </div>
 
           {/* Right: Code Viewer & Architectural Notes (8 Cols) */}
-          <div className="lg:col-span-8 bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl space-y-4 flex flex-col justify-between">
+          <div className="lg:col-span-8 bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl space-y-4 flex flex-col justify-between">
             <div>
               {/* File Info Header */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#223348] pb-3.5 mb-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/50 pb-3.5 mb-3.5">
                 <div>
                   <div className="text-xs font-mono font-bold text-indigo-300 flex items-center gap-2">
                     <FileCode className="w-4 h-4 text-indigo-400" />
@@ -352,7 +352,7 @@ export const CodebaseExplorer: React.FC = () => {
 
                 <button
                   onClick={handleCopy}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl bg-[#0a0c10] hover:bg-[#16202e] text-slate-200 text-xs font-semibold border border-[#223348] transition self-start sm:self-auto cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl bg-[#05070a] hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-700/60 transition self-start sm:self-auto cursor-pointer"
                 >
                   {copied ? (
                     <>
@@ -382,7 +382,7 @@ export const CodebaseExplorer: React.FC = () => {
                 {selectedFile.keyConcepts.map((con, i) => (
                   <span
                     key={i}
-                    className="px-2.5 py-0.5 rounded-full bg-[#16202e] text-slate-300 font-mono text-[10px] border border-[#223348]"
+                    className="px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono text-[10px] border border-slate-700"
                   >
                     {con}
                   </span>
@@ -390,8 +390,8 @@ export const CodebaseExplorer: React.FC = () => {
               </div>
 
               {/* Code Block with Line Numbers */}
-              <div className="relative rounded-2xl overflow-hidden border border-[#223348] bg-[#0a0c10]">
-                <div className="flex items-center justify-between px-4 py-2.5 bg-[#111827] border-b border-[#223348] text-[11px] text-slate-400 font-mono">
+              <div className="relative rounded-2xl overflow-hidden border border-slate-700/50 bg-[#05070a]">
+                <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900/90 border-b border-slate-700/50 text-[11px] text-slate-400 font-mono">
                   <span>Python 3.9+ Standard • Clean Architecture</span>
                   <span>{selectedFile.code.split('\n').length} lines</span>
                 </div>
@@ -401,7 +401,7 @@ export const CodebaseExplorer: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-4 pt-3.5 border-t border-[#223348] text-xs text-slate-400 flex items-center justify-between font-mono flex-wrap gap-2">
+            <div className="mt-4 pt-3.5 border-t border-slate-700/50 text-xs text-slate-400 flex items-center justify-between font-mono flex-wrap gap-2">
               <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
                 <CheckCircle2 className="w-3.5 h-3.5" /> PyTest Validated • Zero Syntax Errors
               </span>
@@ -411,8 +411,8 @@ export const CodebaseExplorer: React.FC = () => {
         </div>
       ) : (
         /* Python CLI Terminal Runner Layout */
-        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#223348] pb-4">
+        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-700/50 pb-4">
             <div>
               <div className="flex items-center gap-2">
                 <Terminal className="w-5 h-5 text-emerald-400" />
@@ -443,7 +443,7 @@ export const CodebaseExplorer: React.FC = () => {
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer disabled:opacity-50 ${
                       isActive
                         ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/40'
-                        : 'bg-[#0a0c10] border border-[#223348] text-slate-300 hover:text-white hover:border-slate-500'
+                        : 'bg-[#05070a] border border-slate-700/60 text-slate-300 hover:text-white hover:border-slate-500'
                     }`}
                   >
                     <Icon className="w-3.5 h-3.5" />
@@ -454,7 +454,7 @@ export const CodebaseExplorer: React.FC = () => {
 
               <button
                 onClick={() => setTerminalLogs([])}
-                className="px-2.5 py-1.5 rounded-xl bg-[#0a0c10] border border-[#223348] text-slate-400 hover:text-white transition text-xs flex items-center gap-1"
+                className="px-2.5 py-1.5 rounded-xl bg-[#05070a] border border-slate-700/60 text-slate-400 hover:text-white transition text-xs flex items-center gap-1"
                 title="Clear terminal"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> Clear
@@ -463,9 +463,9 @@ export const CodebaseExplorer: React.FC = () => {
           </div>
 
           {/* Console Window */}
-          <div className="bg-[#0a0c10] border border-[#223348] rounded-2xl overflow-hidden shadow-2xl font-mono text-xs">
+          <div className="bg-[#05070a] border border-slate-700/60 rounded-2xl overflow-hidden shadow-2xl font-mono text-xs">
             {/* Terminal Title Bar */}
-            <div className="flex items-center justify-between px-4 py-2.5 bg-[#111827] border-b border-[#223348] text-[11px] text-slate-400">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 text-[11px] text-slate-400">
               <div className="flex items-center gap-2">
                 <div className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
                 <div className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
