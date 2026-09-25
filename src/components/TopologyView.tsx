@@ -108,8 +108,8 @@ export const TopologyView: React.FC = () => {
               </div>
             </div>
             <div className="mt-3 text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl flex items-center justify-between font-mono">
-              <span>Murmur2 Hashed</span>
-              <span className="font-bold">~25k msg/s</span>
+              <span>CRC32 Keyed</span>
+              <span className="font-bold">{(streamSimulation.metrics.currentThroughput / 1000).toFixed(1)}k msg/s</span>
             </div>
           </div>
 
@@ -181,7 +181,7 @@ export const TopologyView: React.FC = () => {
             </div>
             <div className="mt-3 text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl flex items-center justify-between font-mono">
               <span>Delivery</span>
-              <span className="font-bold">Exactly-Once</span>
+              <span className="font-bold">Effectively-Once</span>
             </div>
           </div>
         </div>

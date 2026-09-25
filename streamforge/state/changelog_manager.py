@@ -67,12 +67,20 @@ class ChangelogManager:
         changelog_topic: str = "streamforge.truck_state.changelog",
         bootstrap_servers: str = "localhost:9092",
         storage_mode: str = "demo",
+        producer: Optional[Any] = None,
     ) -> None:
         self.changelog_topic = changelog_topic
         self.bootstrap_servers = bootstrap_servers
         self.storage_mode = storage_mode
         self._in_memory_changelog: Dict[int, List[ChangelogRecord]] = {}
-        self._producer = None
+        self._producer = producer
+        self._delivery_errors: List[Any] = []
+
+    def _delivery_callback(self, err: Any, msg: Any) -> None:
+        """Track asynchronous Kafka delivery report errors."""
+        if err is not None:
+            logger.error(f"Changelog Kafka delivery error: {err}")
+            self._delivery_errors.append(err)
 
     def publish_state_change(
         self,
@@ -108,18 +116,53 @@ class ChangelogManager:
             op=op,
         )
         self._in_memory_changelog[partition].append(record)
+
+        # In production mode, also replicate to actual Kafka producer if configured
+        if self._producer is not None:
+            try:
+                self._producer.produce(
+                    topic=self.changelog_topic,
+                    key=record.changelog_key.encode("utf-8"),
+                    value=record.serialize(),
+                    on_delivery=self._delivery_callback,
+                )
+                self._producer.poll(0)
+            except Exception as e:
+                logger.error(f"Failed to produce changelog record for key {key}: {e}")
+                self._delivery_errors.append(e)
+                raise
+
         return offset
 
-    def flush(self, timeout: float = 5) -> bool:
-        """Flush pending changelog produces. In-memory/demo mode always succeeds."""
-        try:
-            if self._producer is not None:
-                remaining = self._producer.flush(timeout)
-                return remaining == 0
-        except Exception as e:
-            logger.error(f"Changelog flush failed: {e}")
+    def flush(self, timeout: float = 5.0) -> bool:
+        """
+        Flush pending changelog produces and verify all delivery callbacks succeeded.
+        Returns True only if 0 messages remain AND no delivery callbacks reported an error.
+        """
+        if self._delivery_errors:
+            logger.error(f"Changelog has {len(self._delivery_errors)} delivery error(s) before flush")
             return False
+        if self._producer is not None:
+            try:
+                remaining = self._producer.flush(timeout)
+                if remaining > 0:
+                    logger.error(f"Changelog flush timed out with {remaining} pending messages")
+                    return False
+                if self._delivery_errors:
+                    logger.error(f"Changelog delivery error reported in flush callback: {self._delivery_errors}")
+                    return False
+            except Exception as e:
+                logger.error(f"Changelog flush failed: {e}")
+                return False
         return True
+
+    def reset_delivery_errors(self) -> None:
+        """Clear delivery errors after recovery or commit failure handling."""
+        self._delivery_errors.clear()
+
+    @property
+    def delivery_errors(self) -> List[Any]:
+        return list(self._delivery_errors)
 
     def _existing_seq(self, target_store: StateStore[str, Dict[str, Any]], key: str) -> Optional[int]:
         try:

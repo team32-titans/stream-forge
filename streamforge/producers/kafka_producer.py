@@ -81,9 +81,16 @@ class KafkaTelemetryProducer:
     def produce_event(self, evt: TruckTelemetryEvent) -> None:
         if self._producer is None:
             raise RuntimeError("Kafka producer not initialized — check bootstrap.servers and confluent-kafka install")
+        # Option B: explicitly provide partition=evt.partition (CRC32) so
+        # Kafka partition, evt.partition, and UI calculated partition strictly agree.
         key, value = self._serialize(evt)
-        # Use truck_id as key for partition affinity (also respects hash partitioning in generator)
-        self._producer.produce(self.topic, key=key, value=value, on_delivery=self._delivery)
+        self._producer.produce(
+            self.topic,
+            key=key,
+            value=value,
+            partition=evt.partition,
+            on_delivery=self._delivery,
+        )
         # Serve delivery callbacks
         self._producer.poll(0)
 

@@ -6,12 +6,13 @@ Author: Member 1 (Stream Processing & Stateful Engine)
 
 Generates real-time IoT sensor readings for 50,000 refrigerated transport trucks.
 Capable of blasting 100,000+ events per second into Kafka partitions using
-Murmur2 key hashing on truck_id.
+CRC32 key hashing on truck_id.
 """
 
 import json
 import random
 import time
+import zlib
 from typing import Generator, List
 from streamforge.core.interfaces import RefrigerationState, TruckTelemetryEvent
 
@@ -34,8 +35,13 @@ class FleetTelemetryGenerator:
         ]
 
     def _get_partition(self, truck_id: str) -> int:
-        """Consistent Murmur2 hashing to distribute trucks evenly across partitions."""
-        return hash(truck_id) % self.num_partitions
+        """Deterministic CRC32 partitioning — stable across processes and restarts.
+
+        Python's built-in ``hash()`` is randomised per process (PYTHONHASHSEED)
+        and therefore not suitable for cross-process deterministic partitioning.
+        ``zlib.crc32`` produces a stable unsigned 32-bit hash.
+        """
+        return zlib.crc32(truck_id.encode("utf-8")) % self.num_partitions
 
     def generate_event(self, truck_index: int, inject_anomaly: bool = False) -> TruckTelemetryEvent:
         """Generate a single high-fidelity telemetry event."""

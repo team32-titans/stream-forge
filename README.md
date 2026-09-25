@@ -102,7 +102,7 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pytest -q  # 16 passed
+python -m pytest -q  # 56 passed
 ```
 
 ### Env
@@ -196,8 +196,8 @@ See `docs/STATE_CHANGELOG_PROTOCOL.md`.
 ## 15. Tests
 
 ```powershell
-python -m pytest -v  # 16 tests
-# - config, producer affinity, Welford stddev+m2 persistence, filter T>0, watermark/late (on-time/within/beyond/out-of-order), changelog seq=source_offset, dup idempotent, stale newer overwrites, failure gating (no commit on changelog fail), crash recovery (partition 6)
+python -m pytest -v  # 56 tests
+# - config, producer affinity (Option B), Welford stddev+m2 persistence, filter T>0, watermark/late (on-time/within/beyond/out-of-order), active window store recovery, changelog seq=source_offset, dup idempotent, stale newer overwrites, failure gating (no commit on changelog fail or delivery callback error), crash recovery (partition 6)
 ```
 
 Integration tests requiring Kafka/Docker are marked and skipped when broker unavailable.

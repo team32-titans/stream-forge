@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { streamSimulation } from './engine/simulationEngine';
+import { IS_DEMO } from './lib/api';
 import { Navbar } from './components/Navbar';
 import { TopologyView } from './components/TopologyView';
 import { ChaosStudio } from './components/ChaosStudio';
@@ -27,20 +28,36 @@ export default function App() {
   const [, forceTick] = useState(0);
 
   useEffect(() => {
-    // Start distributed streaming simulation loop on mount (StrictMode-safe).
-    streamSimulation.startSimulation();
+    // Only start the simulation tick loop in DEMO mode.
+    // In LIVE mode the streamSimulation object still exists (components read
+    // from it as a shared state bus) but the local tick loop does NOT run —
+    // data comes exclusively from the backend via WebSocket / REST.
+    if (IS_DEMO) {
+      streamSimulation.startSimulation();
+    }
     const t = window.setInterval(() => forceTick((x) => x + 1), 1000);
     return () => {
       window.clearInterval(t);
-      streamSimulation.stopSimulation();
+      if (IS_DEMO) {
+        streamSimulation.stopSimulation();
+      }
     };
   }, []);
+
+  const modeLabel = IS_DEMO ? 'demo' : 'live';
 
   return (
     <div className="app-shell min-h-screen bg-[#0a0c10] text-slate-100 flex flex-col antialiased selection:bg-orange-500 selection:text-white">
       <div className="app-glow app-glow-1" />
       <div className="app-glow app-glow-2" />
       <div className="app-grid" />
+
+      {/* DEMO mode banner */}
+      {IS_DEMO && (
+        <div className="bg-yellow-500/90 text-black text-xs font-bold text-center py-1.5 relative z-50 uppercase tracking-wider">
+          ⚠ DEMO MODE — Data is simulated via simulationEngine.ts, not from a live Kafka cluster
+        </div>
+      )}
 
       {/* Top Navigation & Metrics Bar */}
       <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -67,7 +84,7 @@ export default function App() {
             <span className="text-orange-400 font-semibold">Distributed Stateful Engine</span>
           </div>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Uptime: {formatUptime()} (demo session)</span>
+            <span>Uptime: {formatUptime()} ({modeLabel} session)</span>
             <span className="text-slate-600">•</span>
             <span className="text-slate-300">
               Events: {streamSimulation.metrics.totalEventsProcessed.toLocaleString()}
@@ -78,4 +95,3 @@ export default function App() {
     </div>
   );
 }
-

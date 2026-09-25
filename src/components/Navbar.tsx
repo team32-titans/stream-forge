@@ -179,7 +179,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
           <div className="hidden xl:flex items-center gap-5 bg-[#16202e] px-4 py-1.5 rounded-xl border border-[#223348]">
             <div className="text-left">
               <p className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Health</p>
-              <span className="text-emerald-400 font-mono text-xs font-bold">99.99%</span>
+              <span className="text-emerald-400 font-mono text-xs font-bold">{metrics.activeWorkers > 0 ? ((metrics.healthyWorkers / metrics.activeWorkers) * 100).toFixed(1) : '—'}%</span>
             </div>
             <div className="h-6 w-px bg-[#223348]" />
             <div className="text-left">
