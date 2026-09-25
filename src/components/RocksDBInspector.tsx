@@ -82,7 +82,7 @@ export const RocksDBInspector: React.FC = () => {
         <div className="bg-[#111827] border border-emerald-500/40 rounded-3xl p-6 shadow-xl space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-widest text-white">Live state (partition 0) + changelog (partition 0)</h3>
           <pre className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] font-mono text-[11px] text-emerald-300 overflow-x-auto max-h-72 overflow-y-auto">
-            {JSON.stringify({ state: liveState ?? 'Waiting for backend…', changelog: liveChangelog ?? 'Waiting for backend…' }, null, 2)}
+            {JSON.stringify({ state: liveState ?? 'No data yet — is FastAPI running? (python -m streamforge.cli api)', changelog: liveChangelog ?? 'No data yet — is FastAPI running? (python -m streamforge.cli api)' }, null, 2)}
           </pre>
           <p className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">
             Source: Kafka changelog topic in production; API-process memory is DEMO-only and never presented as live.

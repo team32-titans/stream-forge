@@ -1282,3 +1282,30 @@ class TestFrontendLiveDemoSeparation:
         ]:
             src = self._read(rel)
             assert "IS_DEMO" in src, f"{rel} must gate LIVE vs DEMO"
+
+    def test_vite_dev_proxies_api_to_fastapi(self):
+        src = self._read("vite.config.ts")
+        assert "'/api'" in src or '"/api"' in src
+        assert "8000" in src
+        assert "'/ws'" in src or '"/ws"' in src
+
+    def test_server_passthrough_to_fastapi(self):
+        src = self._read("server.ts")
+        assert "FASTAPI_URL" in src
+        assert "/api/workers" in src
+        assert "/api/partitions" in src
+        assert "/ws/metrics" in src
+        assert "502" in src
+
+    def test_navbar_live_badge_from_backend_health(self):
+        src = self._read("src/components/Navbar.tsx")
+        assert "fetch('/api/health')" in src or 'fetch("/api/health")' in src
+        assert "BACKEND DOWN" in src
+        assert "LIVE CONNECTED" in src
+        assert "CONNECTING..." not in src or "PROBING BACKEND" in src
+
+    def test_topology_live_errors_surfaced(self):
+        src = self._read("src/components/TopologyView.tsx")
+        assert "liveError" in src
+        assert "python -m streamforge.cli api" in src
+        assert "Waiting for backend…" not in src

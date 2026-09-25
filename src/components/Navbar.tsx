@@ -41,6 +41,40 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const live = useLiveMetrics(2000);
   const liveGauges = live.data?.gauges ?? {};
   const liveCounters = live.data?.counters ?? {};
+  // LIVE backend reachability (FastAPI /api/health), independent of simulation.
+  const [backendHealth, setBackendHealth] = useState<any>(null);
+  const [backendErr, setBackendErr] = useState<string | null>(null);
+  const [backendMs, setBackendMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (streamMode !== 'live') return;
+    let cancelled = false;
+    const probe = async () => {
+      const t0 = Date.now();
+      try {
+        const res = await fetch('/api/health');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!cancelled) {
+          setBackendHealth(data);
+          setBackendErr(null);
+          setBackendMs(Date.now() - t0);
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setBackendHealth(null);
+          setBackendErr(e?.message ?? 'unreachable');
+          setBackendMs(null);
+        }
+      }
+    };
+    probe();
+    const t = window.setInterval(probe, 3000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [streamMode]);
 
   useEffect(() => {
     const unsubSim = streamSimulation.subscribe(() => {
@@ -86,6 +120,42 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   };
 
   const getConnectionBadge = () => {
+    // DEMO mode: simulation badge (legacy behavior).
+    if (streamMode === 'demo') {
+      return {
+        text: 'DEMO ACCELERATED',
+        subtext: 'simulationEngine',
+        color: 'bg-orange-500',
+        textColor: 'text-orange-400',
+      };
+    }
+    // LIVE mode: badge reflects the real FastAPI backend, never simulation.
+    if (backendHealth === null && backendErr === null) {
+      return {
+        text: 'PROBING BACKEND...',
+        subtext: 'GET /api/health',
+        color: 'bg-amber-500',
+        textColor: 'text-amber-400',
+      };
+    }
+    if (backendErr || !backendHealth) {
+      return {
+        text: 'BACKEND DOWN',
+        subtext: backendErr ?? 'FastAPI unreachable',
+        color: 'bg-rose-500',
+        textColor: 'text-rose-400',
+      };
+    }
+    if (backendHealth) {
+      const degraded = backendHealth.status === 'degraded';
+      const kafka = backendHealth.kafka ? `kafka:${backendHealth.kafka}` : 'kafka:?';
+      return {
+        text: degraded ? 'LIVE DEGRADED' : 'LIVE CONNECTED',
+        subtext: `${kafka} • ${backendHealth.storage_mode ?? 'fastapi'}`,
+        color: degraded ? 'bg-amber-500' : 'bg-emerald-500',
+        textColor: degraded ? 'text-amber-400' : 'text-emerald-400',
+      };
+    }
     switch (connStatus) {
       case 'CONNECTED_WS':
         return {
@@ -145,17 +215,23 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             </div>
           </div>
 
-          {/* Industrial Mode & Connection Pill */}
+          {/* Industrial Mode & Connection Pill — LIVE reflects FastAPI, DEMO reflects simulation */}
           <div className="flex items-center gap-2 bg-[#16202e] px-3.5 py-1.5 rounded-xl border border-[#223348] text-xs font-mono">
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${badge.color} animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.7)]`} />
               <span className={`${badge.textColor} font-bold`}>
-                {streamMode === 'live' ? badge.text : 'DEMO ACCELERATED'}
+                {badge.text}
               </span>
               <span className="text-slate-600">|</span>
               <span className="text-slate-400">{badge.subtext}</span>
               <span className="text-slate-600">|</span>
-              <span className="text-cyan-400">{apiLatency}ms</span>
+              <span className="text-cyan-400">
+                {streamMode === 'live'
+                  ? backendMs !== null
+                    ? `${backendMs}ms`
+                    : '…ms'
+                  : `${apiLatency}ms`}
+              </span>
             </div>
 
             {/* Quick Switch Button */}
@@ -226,8 +302,11 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             </div>
           </div>
 
-          {/* Engine Controls */}
-          <div className="flex items-center gap-2">
+          {/* Engine Controls — simulation only; disabled in LIVE mode */}
+          <div
+            className={`flex items-center gap-2 ${streamMode === 'live' ? 'opacity-40 pointer-events-none' : ''}`}
+            title={streamMode === 'live' ? 'Demo simulation controls — switch to DEMO to use them' : 'Demo simulation controls'}
+          >
             {/* Rate Selector */}
             <div className="flex items-center bg-[#16202e] p-1 rounded-xl border border-[#223348] text-xs">
               <button
@@ -281,6 +360,15 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
       </div>
 
       {/* Navigation Tabs */}
+      {streamMode === 'live' && backendHealth === null && (
+        <div className="max-w-7xl mx-auto px-4 pb-2">
+          <div className="px-4 py-2 rounded-xl border text-[11px] font-mono uppercase tracking-widest bg-rose-500/10 border-rose-500/40 text-rose-300">
+            {backendErr
+              ? `FastAPI unreachable (${backendErr}). Start it with: python -m streamforge.cli api  (default :8000), then reload.`
+              : 'Probing FastAPI at /api/health… (start it with: python -m streamforge.cli api)'}
+          </div>
+        </div>
+      )}
       <div className="max-w-7xl mx-auto px-4 pb-2">
         <div className="flex items-center overflow-x-auto gap-1.5 p-1 bg-[#111827] border border-[#1e293b] rounded-2xl scrollbar-none">
           {[

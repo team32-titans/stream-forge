@@ -124,12 +124,17 @@ docker compose -f infra/docker-compose.workers.yml ps  # 20 containers, unique H
 ```
 
 ### FastAPI + Frontend
+
 ```powershell
 python -m streamforge.cli api  # :8000, /api/health /metrics WS /ws/metrics
-npm run dev  # Vite :3000 proxy /api -> :8000, ?demo toggles simulation
+npm run dev  # Vite :3000 proxies /api + /ws -> :8000 (see vite.config.ts)
+# or: npx tsx server.ts  # :3000 Express + Vite, FastAPI passthrough + /ws/metrics relay
 ```
 
-Without `?demo`, the dashboard connects to FastAPI through the Vite proxy. Set `VITE_DEMO_MODE=true` when you want demo mode to be the default for local development.
+Without `?demo`, the dashboard connects to FastAPI (LIVE badge shows CONNECTED /
+DEGRADED / BACKEND DOWN from real `/api/health`). If FastAPI is not running,
+LIVE panels say exactly that and tell you the start command — nothing spins
+forever on "Waiting for backend". Set `VITE_DEMO_MODE=true` when you want demo mode to be the default for local development.
 
 ### CLI
 ```powershell

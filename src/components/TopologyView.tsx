@@ -32,6 +32,8 @@ export const TopologyView: React.FC = () => {
   const [filterQuery, setFilterQuery] = useState<string>('');
   const [liveWorkers, setLiveWorkers] = useState<any>(null);
   const [livePartitions, setLivePartitions] = useState<any>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [liveAttempts, setLiveAttempts] = useState(0);
   const live = useLiveMetrics(2000);
 
   useEffect(() => {
@@ -50,15 +52,25 @@ export const TopologyView: React.FC = () => {
     let cancelled = false;
     const load = async () => {
       try {
-        const [w, p] = await Promise.all([
-          fetch('/api/workers').then((r) => r.json()).catch(() => null),
-          fetch('/api/partitions').then((r) => r.json()).catch(() => null),
+        const [wRes, pRes] = await Promise.all([
+          fetch('/api/workers'),
+          fetch('/api/partitions'),
         ]);
+        if (!wRes.ok) throw new Error(`workers HTTP ${wRes.status}`);
+        if (!pRes.ok) throw new Error(`partitions HTTP ${pRes.status}`);
+        const [w, p] = await Promise.all([wRes.json(), pRes.json()]);
         if (!cancelled) {
           setLiveWorkers(w);
           setLivePartitions(p);
+          setLiveError(null);
+          setLiveAttempts((n) => n + 1);
         }
-      } catch {}
+      } catch (e: any) {
+        if (!cancelled) {
+          setLiveError(e?.message ?? 'fetch failed');
+          setLiveAttempts((n) => n + 1);
+        }
+      }
     };
     load();
     const t = window.setInterval(load, 5000);
@@ -240,9 +252,24 @@ export const TopologyView: React.FC = () => {
           <p className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5">
             Simulation disabled in LIVE mode. Values below are real backend responses or explicit Unavailable.
           </p>
-          <pre className="mt-3 bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] font-mono text-[11px] text-emerald-300 overflow-x-auto">
-            {JSON.stringify({ workers: liveWorkers ?? 'Waiting for backend…', partitions: livePartitions ? { topic: livePartitions.topic, count: livePartitions.partitions?.length, status: livePartitions.status ?? 'live' } : 'Waiting for backend…' }, null, 2)}
-          </pre>
+          {liveError && !liveWorkers && !livePartitions ? (
+            <div className="mt-3 bg-rose-500/10 border border-rose-500/40 rounded-2xl p-4 font-mono text-[11px] text-rose-300">
+              <div className="font-bold">Backend unreachable: {liveError} (attempt {liveAttempts})</div>
+              <div className="mt-1 text-slate-300">
+                Start FastAPI with: <span className="text-white font-bold">python -m streamforge.cli api</span> (default :8000),
+                then reload. Direct Vite dev maps /api + /ws to :8000 automatically.
+              </div>
+            </div>
+          ) : (
+            <pre className="mt-3 bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] font-mono text-[11px] text-emerald-300 overflow-x-auto">
+              {JSON.stringify({ workers: liveWorkers ?? `retrying…${liveError ? ` (last error: ${liveError})` : ''}`, partitions: livePartitions ? { topic: livePartitions.topic, count: livePartitions.partitions?.length, status: livePartitions.status ?? 'live' } : `retrying…${liveError ? ` (last error: ${liveError})` : ''}` }, null, 2)}
+            </pre>
+          )}
+          {liveError && (liveWorkers || livePartitions) && (
+            <p className="mt-2 text-[10px] font-mono text-amber-300 uppercase tracking-wider">
+              Showing last good data — refresh failed: {liveError} (retrying…)
+            </p>
+          )}
         </div>
       )}
       {IS_DEMO && (

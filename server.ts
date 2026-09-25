@@ -183,6 +183,66 @@ setInterval(() => {
 }, 300);
 
 // ==========================================
+// 0. FastAPI Control-Plane Passthrough (LIVE mode)
+// ==========================================
+// The React LIVE panels call the FastAPI control plane
+// (streamforge/api/main.py, default http://127.0.0.1:8000) on same-origin
+// paths (/api/workers, /api/partitions, /api/metrics, /api/telemetry,
+// /api/changelog, /api/windows/*, /api/state/*, /api/health,
+// POST /api/chaos/kill-worker/*). Forward them transparently. When FastAPI
+// is unreachable, respond 502 {status:'unavailable'} — never fake data.
+// (The legacy Node sim routes below, e.g. /api/stream/*, are untouched.)
+const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000';
+const FASTAPI_PATHS = [
+  '/api/workers',
+  '/api/partitions',
+  '/api/metrics',
+  '/api/telemetry',
+  '/api/changelog',
+  '/api/windows',
+  '/api/state',
+  '/api/health',
+  '/api/chaos/kill-worker',
+];
+app.use(async (req, res, next) => {
+  const pathOnly = (req.path || '').split('?')[0];
+  const owned = FASTAPI_PATHS.some(
+    (p) => pathOnly === p || pathOnly.startsWith(p + '/')
+  );
+  if (!owned) return next();
+  // /api/health has a legacy Node handler below; prefer FastAPI when up,
+  // otherwise fall through to it.
+  const targetUrl = `${FASTAPI_URL}${req.originalUrl}`;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    const upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers: { 'Content-Type': 'application/json' },
+      body:
+        req.method !== 'GET' && req.method !== 'HEAD' && req.body && Object.keys(req.body).length > 0
+          ? JSON.stringify(req.body)
+          : undefined,
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const contentType = upstream.headers.get('content-type') || 'application/json';
+    // Only accept FastAPI-shaped responses; anything else falls through.
+    if (!upstream.ok && pathOnly === '/api/health') return next();
+    res.status(upstream.status);
+    res.setHeader('Content-Type', contentType);
+    res.send(await upstream.text());
+  } catch (err: any) {
+    if (pathOnly === '/api/health') return next(); // legacy Node health below
+    res.status(502).json({
+      status: 'unavailable',
+      warning: `FastAPI control plane unreachable at ${FASTAPI_URL}: ${err?.message || err}`,
+      hint: 'Start it with: python -m streamforge.cli api  (default :8000)',
+    });
+  }
+});
+
+// ==========================================
 // 1. API Health & Engine Status
 // ==========================================
 app.get('/api/health', (req, res) => {
@@ -644,6 +704,51 @@ setInterval(() => {
 httpServer.on('upgrade', (request, socket, head) => {
   const host = request.headers.host || 'localhost';
   const { pathname } = new URL(request.url || '', `http://${host}`);
+  // LIVE metrics socket: relay raw frames to the FastAPI /ws/metrics endpoint
+  // so useLiveMetrics works through the :3000 origin. 502-style close when down.
+  if (pathname === '/ws/metrics') {
+    try {
+      const fastapiWsUrl =
+        (process.env.FASTAPI_URL || 'http://127.0.0.1:8000')
+          .replace(/^http/, 'ws') + '/ws/metrics';
+      const upstream = new WebSocket(fastapiWsUrl);
+      const relay = new WebSocketServer({ noServer: true });
+      relay.handleUpgrade(request, socket as any, head, (client) => {
+        const sendQueue: string[] = [];
+        let open = false;
+        (client as any).on('message', (data: any) => {
+          if (upstream.readyState === WebSocket.OPEN) upstream.send(data.toString());
+        });
+        (client as any).on('close', () => {
+          try { upstream.close(); } catch {}
+        });
+        upstream.on('message', (data: any) => {
+          if ((client as any).readyState === WebSocket.OPEN) (client as any).send(data.toString());
+          else sendQueue.push(data.toString());
+        });
+        upstream.on('open', () => {
+          open = true;
+          while (sendQueue.length > 0) {
+            const m = sendQueue.shift()!;
+            if ((client as any).readyState === WebSocket.OPEN) (client as any).send(m);
+          }
+        });
+        const closeClient = () => {
+          try { (client as any).close(); } catch {}
+        };
+        upstream.on('close', closeClient);
+        upstream.on('error', closeClient);
+        // If upstream never opens (FastAPI down), don't hang: close after 5s.
+        setTimeout(() => {
+          if (!open) closeClient();
+        }, 5000);
+      });
+      return;
+    } catch {
+      try { (socket as any).destroy(); } catch {}
+      return;
+    }
+  }
   if (pathname === '/ws' || pathname === '/api/ws' || pathname.startsWith('/ws/')) {
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request);
