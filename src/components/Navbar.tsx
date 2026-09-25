@@ -41,8 +41,9 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const live = useLiveMetrics(2000);
   const liveGauges = live.data?.gauges ?? {};
   const liveCounters = live.data?.counters ?? {};
-  // LIVE backend reachability (FastAPI /api/health), independent of simulation.
+  // LIVE backend reachability (FastAPI /api/health + /api/workers), independent of simulation.
   const [backendHealth, setBackendHealth] = useState<any>(null);
+  const [backendWorkers, setBackendWorkers] = useState<any>(null);
   const [backendErr, setBackendErr] = useState<string | null>(null);
   const [backendMs, setBackendMs] = useState<number | null>(null);
 
@@ -52,17 +53,20 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
     const probe = async () => {
       const t0 = Date.now();
       try {
-        const res = await fetch('/api/health');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+        const [hRes, wRes] = await Promise.all([fetch('/api/health'), fetch('/api/workers')]);
+        if (!hRes.ok) throw new Error(`health HTTP ${hRes.status}`);
+        if (!wRes.ok) throw new Error(`workers HTTP ${wRes.status}`);
+        const [health, workers] = await Promise.all([hRes.json(), wRes.json()]);
         if (!cancelled) {
-          setBackendHealth(data);
+          setBackendHealth(health);
+          setBackendWorkers(workers);
           setBackendErr(null);
           setBackendMs(Date.now() - t0);
         }
       } catch (e: any) {
         if (!cancelled) {
           setBackendHealth(null);
+          setBackendWorkers(null);
           setBackendErr(e?.message ?? 'unreachable');
           setBackendMs(null);
         }
@@ -190,6 +194,50 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
 
   const badge = getConnectionBadge();
 
+  // LIVE ticker values: real observations only — never uninitialized gauge defaults.
+  const isDemoTicker = IS_DEMO || streamMode === 'demo';
+  const backendReachable = backendHealth !== null || live.live;
+  const kafkaDown =
+    !!backendHealth && !!backendHealth.kafka && backendHealth.kafka !== 'available';
+  const totalEvents = Number(liveCounters['streamforge_events_processed_total'] ?? 0);
+  const eps = Number(liveGauges['streamforge_events_per_second'] ?? 0);
+  const p99 = liveGauges['streamforge_p99_latency_ms'];
+
+  const tickerHealth = isDemoTicker ? (
+    <span className="text-amber-400 font-mono text-xs font-bold" title="Demo simulation value">DEMO</span>
+  ) : backendHealth?.status === 'healthy' ? (
+    <span className="text-emerald-400 font-mono text-xs font-bold">LIVE</span>
+  ) : backendHealth?.status === 'degraded' ? (
+    <span className="text-amber-400 font-mono text-xs font-bold" title={`Backend degraded (kafka: ${backendHealth.kafka})`}>DEGRADED</span>
+  ) : live.live ? (
+    <span className="text-emerald-400 font-mono text-xs font-bold">LIVE</span>
+  ) : (
+    <span className="text-slate-400 font-mono text-xs font-bold" title="Backend unreachable">Unavailable</span>
+  );
+
+  const tickerWorkers = (() => {
+    if (isDemoTicker) return `${metrics.healthyWorkers} / 20 (demo)`;
+    if (!backendReachable || kafkaDown) return 'Unavailable';
+    const obs = backendWorkers?.observed_workers;
+    const target = backendWorkers?.target_workers ?? 20;
+    if (typeof obs === 'number') return `${obs} / ${target} (live)`;
+    return `${target} target · obs unknown`;
+  })();
+
+  const tickerRate = (() => {
+    if (isDemoTicker) return `${(metrics.currentThroughput / 1000).toFixed(1)}k/s (demo)`;
+    if (!backendReachable || kafkaDown) return 'Unavailable';
+    if (totalEvents > 0 || eps > 0) return `${(eps / 1000).toFixed(1)}k/s (live)`;
+    return 'idle (no events)';
+  })();
+
+  const tickerP99 = (() => {
+    if (isDemoTicker) return `${metrics.p99LatencyMs}ms (demo)`;
+    if (!backendReachable || kafkaDown) return 'Unavailable';
+    if (totalEvents > 0 && p99 !== undefined && p99 !== null) return `${p99}ms (live)`;
+    return '— (no samples)';
+  })();
+
   return (
     <header className="sticky top-0 z-50 bg-[#0b0f17]/95 backdrop-blur-md border-b border-[#1e293b] text-slate-100 shadow-xl">
       {/* Main Header Bar */}
@@ -255,49 +303,31 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             </div>
           </div>
 
-          {/* Live Bento Metrics Ticker — LIVE reads backend, DEMO reads simulation */}
+          {/* Live Bento Metrics Ticker — LIVE reads backend observations, DEMO reads simulation */}
           <div className="hidden xl:flex items-center gap-5 bg-[#16202e] px-4 py-1.5 rounded-xl border border-[#223348]">
             <div className="text-left">
               <p className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Health</p>
-              {IS_DEMO || streamMode === 'demo' ? (
-                <span className="text-amber-400 font-mono text-xs font-bold" title="Demo simulation value">DEMO</span>
-              ) : live.live ? (
-                <span className="text-emerald-400 font-mono text-xs font-bold">LIVE</span>
-              ) : (
-                <span className="text-slate-400 font-mono text-xs font-bold" title="Backend unreachable">Unavailable</span>
-              )}
+              {tickerHealth}
             </div>
             <div className="h-6 w-px bg-[#223348]" />
             <div className="text-left">
               <p className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Workers</p>
-              <p className="text-white font-mono text-xs font-bold">
-                {IS_DEMO || streamMode === 'demo'
-                  ? `${metrics.healthyWorkers} / 20 (demo)`
-                  : live.live
-                    ? `${liveGauges['streamforge_active_workers'] ?? '?'} / 20 (live)`
-                    : 'Unavailable'}
+              <p className="text-white font-mono text-xs font-bold" title={isDemoTicker ? 'Demo simulation value' : 'Observed Kafka group members vs configured target'}>
+                {tickerWorkers}
               </p>
             </div>
             <div className="h-6 w-px bg-[#223348]" />
             <div className="text-left">
               <p className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Rate</p>
               <p className="text-indigo-400 font-mono text-xs font-bold">
-                {IS_DEMO || streamMode === 'demo'
-                  ? `${(metrics.currentThroughput / 1000).toFixed(1)}k/s (demo)`
-                  : live.live
-                    ? `${(((liveGauges['streamforge_events_per_second'] ?? 0) as number) / 1000).toFixed(1)}k/s (live)`
-                    : 'Unavailable'}
+                {tickerRate}
               </p>
             </div>
             <div className="h-6 w-px bg-[#223348]" />
             <div className="text-left">
               <p className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">p99</p>
               <p className="text-cyan-400 font-mono text-xs font-bold">
-                {IS_DEMO || streamMode === 'demo'
-                  ? `${metrics.p99LatencyMs}ms (demo)`
-                  : live.live
-                    ? `${liveGauges['streamforge_p99_latency_ms'] ?? '?'}ms (live)`
-                    : 'Unavailable'}
+                {tickerP99}
               </p>
             </div>
           </div>

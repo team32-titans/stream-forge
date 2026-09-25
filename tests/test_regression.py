@@ -1263,6 +1263,16 @@ class TestFrontendLiveDemoSeparation:
         assert "99.99%" not in src
         assert "Unavailable" in src
 
+    def test_navbar_ticker_observed_vs_target(self):
+        src = self._read("src/components/Navbar.tsx")
+        assert "observed_workers" in src
+        assert "obs unknown" in src
+        assert "DEGRADED" in src
+        assert "idle (no events)" in src
+        assert "no samples" in src
+        # Must not present the uninitialized gauge default as an observed count
+        assert "streamforge_active_workers'] ?? '?'} / 20" not in src
+
     def test_metrics_live_source(self):
         src = self._read("src/components/MetricsDashboard.tsx")
         assert "useLiveMetrics" in src and "IS_DEMO" in src
