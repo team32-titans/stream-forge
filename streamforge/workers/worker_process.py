@@ -57,8 +57,10 @@ def on_assign(partitions):
             # Replay changelog
             assert changelog is not None
             changelog.restore_partition_state(pid, store, use_kafka_replay=(s.storage_mode == "production"))
+            # Reconstruct active (in-progress) window accumulators from recovered state
+            restored_active = proc.restore_from_store(store)
+            logger.info(f"[{worker_id}] Recovery done for partition {pid}: restored {restored_active} active window(s)")
             exporter.gauges["streamforge_recovery_events_total"] = exporter.gauges.get("streamforge_recovery_events_total", 0) + 1
-            logger.info(f"[{worker_id}] Recovery done for partition {pid}")
         except Exception as e:
             logger.error(f"Failed to init partition {pid}: {e}")
 
@@ -114,7 +116,11 @@ def main():
     worker_id = s.worker_id
     logger.info(f"Starting worker {worker_id} storage_mode={s.storage_mode} bootstrap={s.kafka_bootstrap_servers}")
     exporter.gauges["streamforge_worker_up"] = 1
-    changelog = ChangelogManager()
+    changelog = ChangelogManager(
+        changelog_topic=s.kafka_changelog_topic,
+        bootstrap_servers=s.kafka_bootstrap_servers,
+        storage_mode=s.storage_mode,
+    )
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
@@ -192,14 +198,56 @@ def main():
                     pass
                 continue
 
+
             changelog_ok = True
-            if results:
+            # Persist active (in-progress) window accumulators so recovery can
+            # reconstruct mid-window state.  Only accumulator state for the
+            # partition that owns this event needs updating.
+            for (truck_id, win_start), acc in proc.active_windows.items():
+                key = f"{truck_id}:{win_start}"
+                win_end = win_start + proc.assigner.window_size_ms
+                val = {
+                    "truck_id": truck_id,
+                    "window_start": win_start,
+                    "window_end": win_end,
+                    "active": True,  # marks in-progress window
+                    **acc.to_dict(),
+                    "seq": msg.offset(),
+                    "source_offset": msg.offset(),
+                }
+                try:
+                    store.put(key, val)
+                except Exception as e:
+                    logger.error(f"RocksDB put (active) failed p={pid} key={key}: {e}")
+                    exporter.counters["streamforge_events_failed_total"] += 1
+                    changelog_ok = False
+                    break
+                try:
+                    changelog.publish_state_change(
+                        partition=pid,
+                        key=key,
+                        value=val,
+                        worker_id=worker_id,
+                        timestamp=int(time.time() * 1000),
+                        source_offset=msg.offset(),
+                    )
+                except Exception as e:
+                    logger.error(f"Changelog publish (active) failed p={pid} key={key}: {e}")
+                    exporter.counters["streamforge_changelog_failures_total"] = exporter.counters.get("streamforge_changelog_failures_total", 0) + 1
+                    changelog_ok = False
+                    break
+                exporter.counters["streamforge_window_updates_total"] += 1
+
+            # Also persist finalized/emitted results (these windows were evicted
+            # from active_windows already).
+            if changelog_ok and results:
                 for res in results:
                     key = f"{res.truck_id}:{res.window_start}"
                     val = res.model_dump(mode="json")
                     # Durable version = Kafka source offset (see changelog_manager protocol)
                     val["seq"] = msg.offset()
                     val["source_offset"] = msg.offset()
+                    val["active"] = False  # finalized window
                     try:
                         store.put(key, val)
                     except Exception as e:
@@ -225,10 +273,10 @@ def main():
 
             # Crash consistency: commit only if RocksDB + changelog ack succeeded
             if changelog_ok:
-                if s.storage_mode == "production":
+                if s.storage_mode == "production" or getattr(changelog, "_producer", None) is not None:
                     flushed = changelog.flush(timeout=5)
-                    if not flushed:
-                        logger.error("Changelog flush failed — NOT committing source offset, will redeliver")
+                    if not flushed or changelog.delivery_errors:
+                        logger.error("Changelog flush/delivery failed — NOT committing source offset, will redeliver")
                         exporter.counters["streamforge_changelog_failures_total"] = exporter.counters.get("streamforge_changelog_failures_total", 0) + 1
                         changelog_ok = False
                 if changelog_ok:

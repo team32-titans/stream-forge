@@ -9,9 +9,10 @@ for 50,000+ IoT fleet vehicles, robust out-of-order event handling with watermar
 and memory-efficient incremental mathematical accumulators.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import math
 from streamforge.core.interfaces import (
+    StateStore,
     TruckTelemetryEvent,
     WindowBounds,
     WindowedAggregateResult,
@@ -222,4 +223,25 @@ class WindowedRollingAverageProcessor:
         """Convenience method returning list of emitted aggregates directly."""
         _, emitted = self.process_telemetry(event)
         return emitted
+
+    def restore_active_window(
+        self, truck_id: str, window_start: int, state: Dict[str, Any]
+    ) -> None:
+        """Restore in-progress window accumulator from persisted state dictionary."""
+        state_key = (truck_id, window_start)
+        self.active_windows[state_key] = TemperatureAccumulator.from_dict(state)
+
+    def restore_from_store(self, store: StateStore[str, Dict[str, Any]]) -> int:
+        """Scan state store and reconstruct all active (in-progress) window accumulators."""
+        restored = 0
+        if not hasattr(store, "scan"):
+            return 0
+        for key, val in store.scan():
+            if isinstance(val, dict) and val.get("active") is True:
+                truck_id = val.get("truck_id")
+                win_start = val.get("window_start")
+                if truck_id is not None and win_start is not None:
+                    self.restore_active_window(str(truck_id), int(win_start), val)
+                    restored += 1
+        return restored
 

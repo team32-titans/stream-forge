@@ -143,7 +143,7 @@ export const CodebaseExplorer: React.FC = () => {
         '',
         '[STEP 5] Verification of Recovered State in worker-01:',
         '  >> Recovered Payload: {avg_temp: -21.4, count: 180, status: OPTIMAL}',
-        '  >> ZERO DATA LOSS CONFIRMED. RPO = 0, RTO = 38ms.',
+        '  >> STATE RECOVERY CONFIRMED: 100% changelog state recovered.',
         '===========================================================================',
         '✓ Chaos test passed cleanly (Exit code: 0)',
       ],
@@ -487,7 +487,7 @@ export const CodebaseExplorer: React.FC = () => {
               ) : (
                 terminalLogs.map((log, idx) => {
                   const isCommand = log.startsWith('$');
-                  const isSuccess = log.startsWith('✓') || log.includes('ZERO DATA LOSS CONFIRMED');
+                  const isSuccess = log.startsWith('✓') || log.includes('STATE RECOVERY CONFIRMED') || log.includes('ZERO DATA LOSS CONFIRMED');
                   const isDivider = log.startsWith('=') || log.startsWith('-');
                   const isProgress = log.includes('Progress:');
                   const isError = log.includes('ERROR') || log.includes('FAIL');

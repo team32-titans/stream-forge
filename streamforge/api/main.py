@@ -70,24 +70,39 @@ def api_metrics():
 
 @app.get("/api/workers")
 def workers():
-    # In production, query Kafka AdminClient for consumer group members
-    # For now, expose exporter + settings
     s = get_settings()
+    observed_workers = None
+    broker_count = 0
+    group_error = None
     try:
         from confluent_kafka.admin import AdminClient
 
         admin = AdminClient({"bootstrap.servers": s.kafka_bootstrap_servers})
-        # List consumer groups — best effort
         md = admin.list_topics(timeout=2)
-        brokers = len(md.brokers) if md.brokers else 0
-    except Exception:
-        brokers = 0
+        broker_count = len(md.brokers) if md.brokers else 0
+        # Best-effort consumer group query
+        try:
+            groups = admin.list_consumer_groups(timeout=3)
+            for g in groups.result().valid:
+                if g.group_id == s.kafka_consumer_group:
+                    desc = admin.describe_consumer_groups([g.group_id])
+                    for gid, fut in desc.items():
+                        gd = fut.result()
+                        observed_workers = len(gd.members)
+                    break
+        except Exception as e:
+            group_error = str(e)
+    except Exception as e:
+        group_error = str(e)
     return {
         "target_workers": s.target_workers,
+        "observed_workers": observed_workers,  # None means unknown, int means observed
         "storage_mode": s.storage_mode,
-        "kafka_brokers": brokers,
+        "kafka_brokers": broker_count,
+        "consumer_group": s.kafka_consumer_group,
         "exporter": {"counters": exporter.counters, "gauges": exporter.gauges},
-        "note": "Real per-worker health requires Docker worker /metrics scrapes. This endpoint aggregates local API view.",
+        "note": "observed_workers is null when Kafka broker is unreachable or consumer group query fails."
+               + (f" Error: {group_error}" if group_error else ""),
     }
 
 
@@ -98,7 +113,7 @@ def partitions():
         from confluent_kafka.admin import AdminClient
 
         admin = AdminClient({"bootstrap.servers": s.kafka_bootstrap_servers})
-        md = admin.list_topics(timeout=5)
+        md = admin.list_topics(timeout=2)
         t = md.topics.get(s.kafka_topic)
         if t is None:
             raise HTTPException(404, f"topic {s.kafka_topic} not found")
@@ -209,6 +224,24 @@ def state_partition(partition: int, prefix: str = "", limit: int = 50):
 
 @app.get("/api/changelog")
 def changelog(partition: int = 0, limit: int = 50):
+    s = get_settings()
+    if s.storage_mode == "production":
+        # In production, the changelog lives in the Kafka compacted topic
+        # streamforge.truck_state.changelog. The API process does not maintain
+        # an in-memory replica — reading it requires a Kafka consumer or
+        # querying individual workers.
+        return {
+            "partition": partition,
+            "changelog_topic": s.kafka_changelog_topic,
+            "count": 0,
+            "records": [],
+            "note": "Production changelog lives in Kafka compacted topic. "
+                    "Use kafka-console-consumer or worker /metrics to inspect state. "
+                    "This API process does not maintain a local replica.",
+        }
+    # Demo / test mode: return records from a shared in-memory changelog if any
+    # exist in this process (they generally won't unless the API process also
+    # runs workers, which only happens in demo/test mode).
     from streamforge.state.changelog_manager import ChangelogManager
 
     cm = ChangelogManager()
@@ -223,6 +256,7 @@ def changelog(partition: int = 0, limit: int = 50):
             {"key": r.key, "changelog_key": r.changelog_key, "seq": r.seq, "offset": r.offset, "op": r.op, "worker": r.worker_source, "timestamp": r.timestamp}
             for r in tail
         ],
+        "mode": "demo",
     }
 
 

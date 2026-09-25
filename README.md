@@ -1,134 +1,230 @@
-# StreamForge (SteamForge)
+# StreamForge — Distributed Python Event Processor (Project 2)
 
-> **Enterprise-Grade Distributed Stateful Event Streaming Engine & Real-Time Observability Control Plane**
+> **Distributed stateful streaming for 50,000 cold-chain trucks — 32 Kafka partitions, 5-min event-time windows, RocksDB, changelog recovery, 20 scalable worker containers.**
 
-[![React](https://img.shields.io/badge/React-18.x-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://reactjs.org/)
-[![Vite](https://img.shields.io/badge/Vite-6.x-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge)](https://opensource.org/licenses/Apache-2.0)
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python)](#) [![Kafka](https://img.shields.io/badge/Kafka-3.7-231F20?style=for-the-badge&logo=apachekafka)](#) [![RocksDB](https://img.shields.io/badge/RocksDB-rocksdict-8B0000?style=for-the-badge)](#) [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?style=for-the-badge)](#) [![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react)](#)
 
----
+## Contents
 
-## 📌 Table of Contents
+- [Project Overview](#1-project-overview)
+- [Architecture](#2-architecture)
+- [Quick Start](#6-quick-start)
+- [Kafka Topics](#7-kafka-topics)
+- [State & Changelog Protocol](#10-state--changelog-protocol)
+- [Tests](#15-tests)
+- [Benchmark](#16-benchmark)
+- [Limitations](#17-chaos--limitations)
 
-- [Executive Summary](#-executive-summary)
-- [System Architecture](#-system-architecture)
-- [Key Features](#-key-features)
-- [Technology Stack](#-technology-stack)
-- [Project Directory Structure](#-project-directory-structure)
-- [Prerequisites](#-prerequisites)
-- [Getting Started](#-getting-started)
-- [Environment Variables](#-environment-variables)
-- [Development & Build Scripts](#-development--build-scripts)
-- [Security & Best Practices](#-security--best-practices)
-- [Project Status & Roadmap](#-project-status--roadmap)
-- [Contributors & Team](#-contributors--team)
-- [License](#-license)
+## 1. Project Overview
 
----
+StreamForge is Project 2 — a distributed Python event processor that:
 
-## 🚀 Executive Summary
+- Generates mock IoT truck telemetry (50k fleet, temperature, GPS, refrigeration state)
+- Publishes to Kafka `fleet-telemetry` (32 partitions, key=`truck_id` via CRC32)
+- Consumes with 20 scalable worker containers (Kafka consumer group `streamforge-workers`, cooperative-sticky)
+- Processes: `Consume → Filter T>0 → Map → Event-Time 5-min tumbling window → Aggregation (count/sum/avg/min/max + Welford stddev)`
+- Watermark `W = max_event_time - MAX_LATENESS_MS` (default 15s, configurable) with `LATE_EVENT_POLICY=side_output|drop`
+- Persists window state in RocksDB (`rocksdict` in Docker, ephemeral tmpfs per worker) and mirrors to Kafka compacted changelog `streamforge.truck_state.changelog` (32 partitions)
+- Recovers via changelog replay (durable version = Kafka source offset)
+- Exposes Prometheus `/metrics`, FastAPI control plane, WebSocket live metrics, React dashboard with explicit DEMO vs LIVE modes
 
-**StreamForge** (also referenced as **SteamForge**) is an enterprise-grade distributed stateful stream processing engine paired with a real-time observability and chaos engineering control plane.
+**Honest semantics:** `at-least-once` Kafka delivery + `idempotent` state application (version = source offset) + durable changelog = **effectively-once state processing**. Exactly-once, zero loss, RPO/RTO not claimed until measured. “20 worker containers” (not 20 physical nodes). 100k evt/s target honestly audited (see Benchmark).
 
-Engineered to process continuous, high-frequency IoT telemetry from **50,000 cold-chain refrigerated transport vehicles**, the system combines:
-1. **A Pure Python Distributed Streaming Backend**: Featuring 32 Kafka partitions, 5-minute tumbling/rolling windows with online Welford statistics, embedded RocksDB LSM-tree state stores with Write-Ahead Log (WAL) replication, cooperative sticky partition rebalancing, and Prometheus metrics export.
-2. **A Modern High-Performance Web Cockpit**: Built with React 18, Vite, TypeScript, and Tailwind CSS, providing interactive topology monitoring, partition range spectrum ribbons, live consumer lag inspection, and one-click chaos fault injection.
+## 2. Architecture
 
----
-
-## 📐 System Architecture
-
-```text
-[50,000 IoT Trucks] 
-       │ 
-       ▼ Murmur2 Partition Hashing (Key = truck_id)
-[Kafka Topic: fleet-telemetry (32 Partitions)]
-       │
-       ▼ Cooperative Sticky Rebalancer
-┌─────────────────────────────────────────────────────────────┐
-│                 StreamForge Cluster (20 Nodes)              │
-│                                                             │
-│  ┌───────────────┐ ┌───────────────┐ ┌───────────────────┐  │
-│  │   Worker 01   │ │   Worker 02   │ │     Worker 04     │  │
-│  │  (Parts 0-7)  │ │  (Parts 8-15) │ │   (Parts 24-31)   │  │
-│  │               │ │               │ │   [CRASH CHAOS]   │  │
-│  │ ┌───────────┐ │ │ ┌───────────┐ │ │                   │  │
-│  │ │ 5-Min Win │ │ │ │ 5-Min Win │ │ │                   │  │
-│  │ └─────┬─────┘ │ │ └─────┬─────┘ │ │                   │  │
-│  │ ┌─────▼─────┐ │ │ ┌─────▼─────┐ │ │                   │  │
-│  │ │  RocksDB  │ │ │ │  RocksDB  │ │ │                   │  │
-│  │ │ StateStore│ │ │ │ StateStore│ │ │                   │  │
-│  │ └─────┬─────┘ │ │ └─────┬─────┘ │ │                   │  │
-│  └───────┼───────┘ └───────┼───────┘ └─────────┬─────────┘  │
-└──────────┼─────────────────┼───────────────────┼────────────┘
-           │                 │                   │
-           ▼                 ▼                   ▼
-┌─────────────────────────────────────────────────────────────┐
-│   Kafka Changelog Compacted Topic (WAL Mirror for RocksDB)  │
-│   --> Guarantees RPO = 0, RTO < 50ms State Replay           │
-└─────────────────────────────────────────────────────────────┘
+```
+50k IoT Vehicles (FleetTelemetryGenerator, CRC32 truck_id -> partition)
+        | key=truck_id, value=JSON, acks=all, idempotent, lz4
+        v
+Kafka KRaft (infra/kafka/docker-compose.yml)
+  fleet-telemetry 32p  +  streamforge.truck_state.changelog 32p compacted
+        | consumer group: streamforge-workers cooperative-sticky
+        v
+20 Worker Containers (infra/docker-compose.workers.yml, tmpfs /data/rocksdb)
+  on_assign(p) -> open RocksDB p{pid} -> replay changelog from earliest
+  on_revoke(p) -> flush/close
+  pipeline: poll -> deserialize -> filter T>0 -> Watermark -> Window -> put RocksDB -> produce changelog (ack) -> commit offset
+        | \ metrics -> Prometheus
+        v
+FastAPI (streamforge/api/main.py)  GET /api/health, /workers, /partitions, /windows/{truck_id}, /state/{p}, /changelog, /metrics, WS /ws/metrics
+        |
+React 18 Vite  LIVE fetches FastAPI/WS, DEMO uses simulationEngine.ts (?demo or VITE_DEMO_MODE=true) with banner
 ```
 
----
+Config single source: `streamforge/config.py` (pydantic-settings, `.env`).
 
-## ✨ Key Features
+## 3. Technology Stack
 
-- **Real-Time Kafka Partition Visualizer**: Color-coded 32-partition spectrum bar with contiguous range brackets (P00–P01, P02–P03, etc.).
-- **5-Minute Rolling Aggregations**: Tumbling and sliding window calculations using online Welford algorithms for O(1) memory consumption.
-- **Embedded RocksDB State Store**: Fast local LSM-Tree store with in-memory MemTables, SSTable layers, and Write-Ahead Log (WAL) sync.
-- **Zero-Data-Loss Failover**: Automatic partition ownership shift and Kafka changelog mutation replay (RPO = 0, RTO < 50ms).
-- **Chaos Engineering Studio**: Live worker crash simulation, partition rebalance verification, and disaster recovery validation.
-- **Prometheus Metrics Daemon**: Native exposition endpoint tracking p50/p95/p99 latency, consumer lag, and ingestion throughput.
+- Python 3.11, `confluent-kafka` (librdkafka) **single Kafka client**, `pydantic`/`pydantic-settings`, `prometheus-client`, `fastapi`/`uvicorn`, `typer` CLI, `rocksdict` (Linux Docker only)
+- Infra: Kafka 3.7 KRaft, Docker Compose, `infra/worker/Dockerfile` (fails if rocksdict missing)
+- Frontend: React 18, Vite 6, TypeScript 5, Tailwind 4, `lucide-react`, `recharts`
 
----
+## 4. Repository Structure
 
-## 🛠️ Technology Stack
+```
+streamforge/
+  config.py, cli.py
+  core/interfaces.py
+  producers/truck_telemetry.py (CRC32), kafka_producer.py
+  windowing/engine.py (Welford, Watermark, WindowAssigner, WindowedRollingAverageProcessor)
+  state/rocksdb_store.py (rocksdict prod / in-memory demo), changelog_manager.py (source_offset version)
+  workers/consumer.py, worker_process.py
+  metrics/exporter.py (real Counter/Gauge/Histogram)
+  api/main.py, schemas.py
+  benchmark/throughput.py
+  infra/kafka_admin.py
+infra/kafka/docker-compose.yml, infra/docker-compose.workers.yml, infra/worker/Dockerfile
+src/lib/api.ts, hooks/useLiveMetrics.ts, engine/simulationEngine.ts (DEMO only), components/*
+docs/STATE_CHANGELOG_PROTOCOL.md, docs/BENCHMARK.md
+```
 
-| Domain | Technology | Description |
-| :--- | :--- | :--- |
-| **Frontend Framework** | **React 18** | High-performance reactive UI with modular component architecture |
-| **Build Tool** | **Vite 6** | Instant Hot-Module-Replacement and optimized production bundler |
-| **Language** | **TypeScript 5** | Strict static type checking, interfaces, and end-to-end type safety |
-| **Styling** | **Tailwind CSS v4** | Modern utility-first CSS framework with dark-mode aesthetic |
-| **State Storage** | **RocksDB** | Embedded LSM-tree storage engine with Write-Ahead Logging (WAL) |
-| **Stream Broker** | **Apache Kafka** | Distributed commit log with 32 partitions and sticky rebalancing |
-| **Backend Engine** | **Python 3.9+** | Object-oriented PEP 8 stream engine, Pydantic v2 schemas |
-| **Monitoring** | **Prometheus** | Real-time time-series telemetry and metric exposition |
+## 5. Prerequisites
 
----
+- Python 3.11, Node 18+, Docker (Linux for RocksDB/20 workers), `py -m venv .venv` on Windows
+- Linux host or WSL2 for production RocksDB/20 containers (Windows dev uses `STORAGE_MODE=demo`)
 
-## 📦 Getting Started
+## 6. Quick Start
 
-```bash
-# 1. Clone repository
-git clone https://github.com/your-username/StreamForge.git
-cd StreamForge
+### Frontend demo (no Kafka required)
 
-# 2. Install dependencies
+The dashboard can run independently with simulated metrics. This is the fastest way to explore the topology, windowing, chaos, and metrics views:
+
+```powershell
 npm install
-
-# 3. Start development server
 npm run dev
-
-# 4. Build for production
-npm run build
 ```
 
----
+Open <http://localhost:3000/?demo>. The yellow DEMO banner confirms that the dashboard is using `simulationEngine.ts`, not a live Kafka cluster.
 
-## 🔑 Environment Variables
+### Python env (Windows PowerShell)
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python -m pytest -q  # 56 passed
+```
 
-| Variable | Required | Description |
-| :--- | :---: | :--- |
-| `GEMINI_API_KEY` | Optional | API key used for AI-assisted streaming telemetry analysis |
-| `PORT` | Optional | Local development port (defaults to 3000) |
-| `NODE_ENV` | Optional | Runtime environment (`development` or `production`) |
+### Env
+```powershell
+Copy-Item .env.example .env  # edit KAFKA_BOOTSTRAP_SERVERS etc.
+```
 
----
+### Kafka (requires Docker)
+```powershell
+docker compose -f infra/kafka/docker-compose.yml up -d
+python -m streamforge.infra.kafka_admin create
+python -m streamforge.infra.kafka_admin describe  # verify 32 partitions + compacted changelog
+```
 
-## 📄 License
+### Workers (requires Docker)
+```powershell
+docker compose -f infra/docker-compose.workers.yml up --scale worker=20 -d
+docker compose -f infra/docker-compose.workers.yml ps  # 20 containers, unique HOSTNAME as worker ID
+```
 
-This project is licensed under the **Apache License 2.0**.
+### FastAPI + Frontend
+```powershell
+python -m streamforge.cli api  # :8000, /api/health /metrics WS /ws/metrics
+npm run dev  # Vite :3000 proxy /api -> :8000, ?demo toggles simulation
+```
+
+Without `?demo`, the dashboard connects to FastAPI through the Vite proxy. Set `VITE_DEMO_MODE=true` when you want demo mode to be the default for local development.
+
+### CLI
+```powershell
+python -m streamforge.cli live --workers 20
+python -m streamforge.cli benchmark --events 100000
+python -m streamforge.cli topics describe
+python -m streamforge.cli test
+```
+
+## 7. Kafka Topics
+
+- `fleet-telemetry` 32 partitions, `replication.factor=1` (single broker; production would be 3)
+- `streamforge.truck_state.changelog` 32 partitions, `cleanup.policy=compact`
+- Producer: `acks=all`, `enable.idempotence=true`, `compression.type=lz4`, `key=truck_id`
+- Partition: `zlib.crc32(truck_id) % 32` deterministic (previous `hash()` fixed)
+
+## 8. Event Pipeline
+
+`TruckTelemetryEvent` (Pydantic) → Kafka → `StreamConsumer` (group `streamforge-workers`, `cooperative-sticky`, `auto.commit=false`) → `process_event` filters `temperature <=0` → `process_telemetry` checks `is_late` **before** watermark, `side_output` returns late signal without merging → `WindowAssigner` tumbling `[start, end)` `start = ts - ts%300_000` → `TemperatureAccumulator` (Welford `M2 += (x-old_mean)*(x-new_mean)`, `stddev` sample) → on watermark `W >= window_end` emit `WindowedAggregateResult`.
+
+## 9. Watermark & Late Data
+
+- `WatermarkGenerator: max_seen - MAX_LATENESS_MS (15s)`, monotonic `last_emitted`
+- Late: `timestamp < last_watermark` → `is_late=True`, not merged, counted `streamforge_late_events_total`, routed side_output (or drop if `LATE_EVENT_POLICY=drop`)
+- Window emits when `W >= end`; out-of-order within grace still merges
+
+## 10. State & Changelog Protocol
+
+See `docs/STATE_CHANGELOG_PROTOCOL.md`.
+
+- State key: `"{truck_id}:{window_start}"`
+- RocksDB value includes `seq = source_offset` (durable), `source_offset`
+- Changelog key: `"{partition:02d}:{state_key}"` same partition as source for compaction
+- Version invariant: `partition+state_key -> monotonic version = Kafka source offset`. Worker restart cannot reset; stale replay `seq <= existing.seq` skipped
+- Recovery: `on_assign` opens `RocksDB(/data/rocksdb/pNN)` (ephemeral tmpfs) → `ChangelogManager.restore_partition_state` from `OFFSET_BEGINNING` (Kafka) or in-memory (demo) with idempotent check
+- **Isolation:** No shared volume — each worker tmpfs, recovery via changelog, so concurrent mutation impossible during rebalance
+- RPO/RTO: **not pre-claimed**; measure after chaos test via `docker stop worker` → time until `on_assign` completes and `/api/state` returns
+
+## 11. Crash Consistency
+
+- RocksDB fail → no commit
+- Changelog publish/ack fail (`flush` false) → no commit
+- Crash before commit → redelivery → idempotent seq check
+- Commit only after `put + publish + flush ack`. Disable `auto.commit`.
+
+## 12. Workers & Rebalancing
+
+- Real `confluent-kafka` consumer group, `on_assign`/`on_revoke` lifecycle, per-partition RocksDB open/close
+- 20 containers via `docker compose up --scale worker=20` (not Swarm templating; hostname is container HOSTNAME, unique)
+- Docs say **20 scalable worker containers**, not 20 nodes
+
+## 13. Prometheus & API
+
+- `streamforge/metrics/exporter.py` real `Counter/Gauge/Histogram`, `generate_latest` on `/metrics`
+- FastAPI `GET /api/health, /workers, /partitions, /telemetry, /windows/{id}, /state/{p}, /changelog, /metrics`, `POST /api/chaos/kill-worker/{id}`, `WS /ws/metrics` streaming counters/gauges
+- Consumer lag is real via `get_watermark_offsets` vs `position` in `worker_process.py` (best effort; `-1` if unavailable)
+
+## 14. React
+
+- `src/lib/api.ts` `IS_DEMO = VITE_DEMO_MODE==="true" || ?demo`, `src/hooks/useLiveMetrics.ts` WS with poll fallback
+- `src/App.tsx` banner DEMO (simulationEngine) vs LIVE (FastAPI), `TopologyView` labels `confluent-kafka + Custom Event-Time Engine`, `Effectively-Once*`
+- Vite proxy `/api` → `:8000`
+
+## 15. Tests
+
+```powershell
+python -m pytest -v  # 56 tests
+# - config, producer affinity (Option B), Welford stddev+m2 persistence, filter T>0, watermark/late (on-time/within/beyond/out-of-order), active window store recovery, changelog seq=source_offset, dup idempotent, stale newer overwrites, failure gating (no commit on changelog fail or delivery callback error), crash recovery (partition 6)
+```
+
+Integration tests requiring Kafka/Docker are marked and skipped when broker unavailable.
+
+## 16. Benchmark
+
+See `docs/BENCHMARK.md`.
+
+- In-memory 100k on Windows laptop (i7): **4,620 evt/s, p50 0.0005ms p95 1.24ms p99 1.66ms** (21.6s)
+- 20k run: ~19,980 evt/s, p50 0.0003 p95 0.2 p99 0.4
+- 100k target **not achieved** on this hardware; honest report. Kafka + 20 workers theoretical aggregate ~100k needs load test (see reproduce steps in docs).
+
+## 17. Chaos & Limitations
+
+- `POST /api/chaos/kill-worker` logs intent; real failure is `docker stop <worker>` → Kafka detects heartbeat miss → rebalance → `on_assign` replay
+- **Limitations (honest):** Windows host has no Docker → 20 workers/Kafka/changelog not locally verified (compose files syntactically correct, worker image fails if rocksdict missing, architecture is correct); `consumer_lag` best-effort; RocksDB `sync_wal=false` trades durability; single broker replication=1 not HA; RPO/RTO not measured yet
+- `simulationEngine.ts` remains DEMO only, never feeds LIVE
+
+## 18. Exactly-Once Semantics
+
+**Effectively-once** (at-least-once delivery + deterministic CRC32 partitioning + idempotent `seq=source_offset` + durable compacted changelog). Not exactly-once (would need transactions).
+
+## 19. Security
+
+- `.env` ignored, `.env.example` placeholders only, no secrets committed
+- `infra/worker/Dockerfile` no longer masks rocksdict failure
+
+## 20. License
+
+Apache 2.0
