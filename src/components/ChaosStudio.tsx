@@ -19,6 +19,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
+import { IS_DEMO } from '../lib/api';
 import { ChaosEvent, WorkerNode } from '../types/stream';
 
 export const ChaosStudio: React.FC = () => {
@@ -27,8 +28,10 @@ export const ChaosStudio: React.FC = () => {
   const [chaosHistory, setChaosHistory] = useState<ChaosEvent[]>(streamSimulation.chaosHistory);
   const [isKilling, setIsKilling] = useState<boolean>(false);
   const [selectedKillTarget, setSelectedKillTarget] = useState<string>('worker-04');
+  const [liveResult, setLiveResult] = useState<any>(null);
 
   useEffect(() => {
+    if (!IS_DEMO) return; // LIVE uses backend endpoint, never simulation
     const unsubscribe = streamSimulation.subscribe(() => {
       setWorkers([...streamSimulation.workers]);
       setCurrentChaos(streamSimulation.currentChaosEvent);
@@ -39,20 +42,30 @@ export const ChaosStudio: React.FC = () => {
 
   const handleKillWorker = async (targetId: string) => {
     setIsKilling(true);
-    await streamSimulation.triggerKillWorker(targetId);
-    setIsKilling(false);
+    try {
+      if (IS_DEMO) {
+        await streamSimulation.triggerKillWorker(targetId);
+      } else {
+        // LIVE: request the backend failure signal. The API does NOT kill
+        // anything by itself — real termination needs docker/k8s externally.
+        const res = await fetch(`/api/chaos/kill-worker/${targetId}`, { method: 'POST' });
+        setLiveResult(await res.json().catch(() => ({ status: 'unknown' })));
+      }
+    } finally {
+      setIsKilling(false);
+    }
   };
 
   const handleReviveWorker = (targetId: string) => {
-    streamSimulation.reviveWorker(targetId);
+    if (IS_DEMO) streamSimulation.reviveWorker(targetId);
   };
 
   const handleLateData = () => {
-    streamSimulation.injectLateDataBurst();
+    if (IS_DEMO) streamSimulation.injectLateDataBurst();
   };
 
   const handleColdChainSpike = () => {
-    streamSimulation.injectColdChainSpike();
+    if (IS_DEMO) streamSimulation.injectColdChainSpike();
   };
 
   const worker4 = workers.find((w) => w.id === 'worker-04');
@@ -60,8 +73,23 @@ export const ChaosStudio: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Header Banner Bento Card */}
-      <div className="bg-[#111620]/60 backdrop-blur-sm border border-rose-500/30 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+      <div
+        className={`px-4 py-2 rounded-xl border text-[11px] font-mono font-bold uppercase tracking-wider ${
+          IS_DEMO ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+        }`}
+      >
+        {IS_DEMO
+          ? 'DEMO CHAOS — simulationEngine trigger (no real workers harmed).'
+          : 'LIVE CHAOS — backend failure-signal request only (external `docker stop <worker>` required for real termination).'}
+      </div>
+      {!IS_DEMO && liveResult && (
+        <pre className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] font-mono text-[11px] text-amber-300 overflow-x-auto">
+          {JSON.stringify(liveResult, null, 2)}
+        </pre>
+      )}
+      {IS_DEMO && (<>
+      {/* Header Banner Bento Card (DEMO simulation) */}
+      <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center shadow-[0_0_15px_rgba(244,63,94,0.3)]">
@@ -73,11 +101,13 @@ export const ChaosStudio: React.FC = () => {
                   CHAOS ENGINEERING & FAULT TOLERANCE
                 </h2>
                 <span className="text-[9px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-mono font-bold border border-rose-500/30 uppercase tracking-wider">
-                  Week 3 Milestone
+                  Failover Milestone
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 uppercase tracking-wider mt-0.5">
-                Simulate worker crashes mid-calculation, trigger Kafka rebalances, and verify RocksDB state recovery with zero loss
+                {IS_DEMO
+                  ? 'Demo: crash simulated workers mid-window and replay the demo changelog mirror'
+                  : 'Live: request failure signals; real recovery observed via Kafka rebalance + changelog replay'}
               </p>
             </div>
           </div>
@@ -106,11 +136,11 @@ export const ChaosStudio: React.FC = () => {
       </div>
 
       {/* Week 3 Core Scenario: Worker #4 ➔ Worker #5 State Migration Inspector */}
-      <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl">
-        <div className="flex items-center justify-between border-b border-slate-700/50 pb-4 mb-4">
+      <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
+        <div className="flex items-center justify-between border-b border-[#223348] pb-4 mb-4">
           <div className="flex items-center gap-2">
             <Database className="w-4 h-4 text-indigo-400" />
-            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-200">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-white">
               Stateful Recovery: Worker #4 ➔ Worker #5 Partition Migration
             </h3>
           </div>
@@ -126,13 +156,13 @@ export const ChaosStudio: React.FC = () => {
             className={`p-5 rounded-2xl border transition ${
               worker4?.status === 'CRASHED'
                 ? 'bg-rose-950/20 border-rose-500/50 shadow-[0_0_15px_rgba(244,63,94,0.15)]'
-                : 'bg-[#05070a] border-slate-700/50'
+                : 'bg-[#16202e] border-[#223348]'
             }`}
           >
             <div className="flex items-center justify-between mb-3.5">
               <div className="flex items-center gap-2">
                 <Server className="w-4 h-4 text-indigo-400" />
-                <span className="font-bold text-sm text-slate-100 font-mono">Worker Node #4</span>
+                <span className="font-bold text-sm text-white font-mono">Worker Node #4</span>
               </div>
               <span
                 className={`text-[9px] font-bold px-2 py-0.5 rounded-full font-mono uppercase tracking-wider ${
@@ -171,7 +201,7 @@ export const ChaosStudio: React.FC = () => {
                 <span className="text-[11px] text-rose-300 font-mono">Worker terminated via SIGKILL</span>
                 <button
                   onClick={() => handleReviveWorker('worker-04')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1f2d40] hover:bg-[#273852] text-white text-xs font-semibold border border-[#223348] transition"
                 >
                   <Undo2 className="w-3.5 h-3.5 text-indigo-400" /> Revive Node
                 </button>
@@ -184,13 +214,13 @@ export const ChaosStudio: React.FC = () => {
             className={`p-5 rounded-2xl border transition ${
               worker5?.status === 'RECOVERING'
                 ? 'bg-amber-950/20 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.15)]'
-                : 'bg-[#05070a] border-slate-700/50'
+                : 'bg-[#16202e] border-[#223348]'
             }`}
           >
             <div className="flex items-center justify-between mb-3.5">
               <div className="flex items-center gap-2">
                 <Server className="w-4 h-4 text-emerald-400" />
-                <span className="font-bold text-sm text-slate-100 font-mono">Worker Node #5 (Receiver)</span>
+                <span className="font-bold text-sm text-white font-mono">Worker Node #5 (Receiver)</span>
               </div>
               <span
                 className={`text-[9px] font-bold px-2 py-0.5 rounded-full font-mono uppercase tracking-wider ${
@@ -224,7 +254,7 @@ export const ChaosStudio: React.FC = () => {
               </div>
             </div>
 
-            <div className="mt-4 pt-3.5 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between font-mono">
+            <div className="mt-4 pt-3.5 border-t border-[#223348] text-[11px] text-slate-400 flex items-center justify-between font-mono">
               <span className="font-sans">Changelog Replay:</span>
               <span className="text-indigo-300">Offset #0 ➔ Current (#45,240)</span>
             </div>
@@ -234,11 +264,11 @@ export const ChaosStudio: React.FC = () => {
 
       {/* Real-time Failover Execution Log */}
       {currentChaos && (
-        <div className="bg-[#111620]/60 backdrop-blur-sm border border-indigo-500/40 rounded-3xl p-6 shadow-xl">
-          <div className="flex items-center justify-between mb-3.5 border-b border-slate-700/50 pb-3">
+        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
+          <div className="flex items-center justify-between mb-3.5 border-b border-[#223348] pb-3">
             <div className="flex items-center gap-2">
               <Terminal className="w-4 h-4 text-indigo-400" />
-              <h4 className="text-xs font-bold uppercase tracking-widest text-slate-200">
+              <h4 className="text-xs font-bold uppercase tracking-widest text-white">
                 Live State Recovery & Failover Execution Log
               </h4>
             </div>
@@ -253,9 +283,9 @@ export const ChaosStudio: React.FC = () => {
             </span>
           </div>
 
-          <div className="bg-[#05070a] p-4 rounded-2xl border border-slate-800 font-mono text-xs space-y-2 max-h-48 overflow-y-auto">
+          <div className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] font-mono text-xs space-y-2 max-h-48 overflow-y-auto">
             {currentChaos.recoveryLog.map((line, idx) => (
-              <div key={idx} className="text-slate-300 flex items-start gap-2">
+              <div key={idx} className="text-slate-200 flex items-start gap-2">
                 <ArrowRight className="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5" />
                 <span>{line}</span>
               </div>
@@ -267,7 +297,7 @@ export const ChaosStudio: React.FC = () => {
       {/* Auxiliary Chaos Injections: Late Data & Fleet Spikes */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Late Data Injection */}
-        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl flex flex-col justify-between">
+        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 mb-2">
               <Clock className="w-4 h-4 text-amber-400" />
@@ -291,7 +321,7 @@ export const ChaosStudio: React.FC = () => {
         </div>
 
         {/* Cold-Chain Refrigeration Spike */}
-        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl flex flex-col justify-between">
+        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 mb-2">
               <Flame className="w-4 h-4 text-rose-400" />
@@ -315,11 +345,11 @@ export const ChaosStudio: React.FC = () => {
         </div>
       </div>
 
-      {/* Target Worker Selector Table */}
-      <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl">
-        <h4 className="text-xs font-bold uppercase tracking-widest text-slate-300 mb-4 flex items-center gap-2">
+      {/* Target Worker Selector Table (DEMO simulation targets) */}
+      <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
+        <h4 className="text-xs font-bold uppercase tracking-widest text-white mb-4 flex items-center gap-2">
           <Server className="w-4 h-4 text-indigo-400" />
-          Worker Crash Target Selector (Choose any node 1–20 to kill)
+          Demo Worker Crash Target Selector (simulation 1–20)
         </h4>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2.5">
@@ -330,10 +360,10 @@ export const ChaosStudio: React.FC = () => {
               className={`p-3 rounded-2xl border text-xs font-mono text-left transition flex items-center justify-between ${
                 selectedKillTarget === w.id
                   ? 'bg-rose-500/20 border-rose-500 text-rose-300 font-bold shadow-[0_0_12px_rgba(244,63,94,0.2)]'
-                  : 'bg-[#05070a] border-slate-700/40 text-slate-300 hover:border-slate-600'
+                  : 'bg-[#16202e] border-[#223348] text-slate-200 hover:border-slate-500'
               }`}
             >
-              <span>{w.id}</span>
+              <span className="font-bold">{w.id}</span>
               <span
                 className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
                   w.status === 'HEALTHY'
@@ -346,7 +376,37 @@ export const ChaosStudio: React.FC = () => {
             </button>
           ))}
         </div>
+        <p className="mt-3 text-[10px] font-mono text-slate-500 uppercase tracking-wider">
+          Demo targets only. LIVE termination requires external orchestration; the backend endpoint records a failure-signal request.
+        </p>
       </div>
+      </>)}
+      {!IS_DEMO && (
+        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
+          <h4 className="text-xs font-bold uppercase tracking-widest text-white mb-2">LIVE chaos instructions</h4>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            1) Press KILL above to record a failure-signal request. 2) Actually stop a worker externally
+            (<span className="font-mono text-slate-200">docker stop &lt;worker&gt;</span>). 3) Watch Kafka rebalance via
+            <span className="font-mono text-slate-200"> /api/workers</span> and changelog replay via
+            <span className="font-mono text-slate-200"> /api/changelog</span>. No rebalance result is fabricated here.
+          </p>
+          <div className="mt-3 flex items-center gap-3">
+            <input
+              type="text"
+              value={selectedKillTarget}
+              onChange={(e) => setSelectedKillTarget(e.target.value)}
+              className="bg-[#0a0c10] border border-[#223348] rounded-xl px-3 py-1.5 text-xs font-mono text-slate-200 w-48"
+            />
+            <button
+              onClick={() => handleKillWorker(selectedKillTarget)}
+              disabled={isKilling}
+              className="px-4 py-2 rounded-2xl bg-rose-500 hover:bg-rose-400 text-slate-950 font-bold text-xs disabled:opacity-50"
+            >
+              {isKilling ? 'Requesting…' : 'Send failure-signal request'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

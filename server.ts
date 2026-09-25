@@ -458,10 +458,10 @@ app.post('/api/model/chat', async (req, res) => {
         const systemInstruction = `You are StreamForge Chief Architect AI.
 StreamForge is an enterprise distributed stateful event streaming engine designed for 50,000 IoT refrigerated trucks.
 Key Architecture:
-- 32 Kafka topic partitions assigned to 20 scalable worker containers using Cooperative Sticky Rebalancing.
+- 32 Kafka topic partitions assigned to 20 Python worker nodes using Cooperative Sticky Rebalancing.
 - Stateful 5-minute rolling window averages computed in O(1) time and space using Welford's algorithm (count, mean, M2).
-- Embedded LSM-Tree RocksDB local state store backed by a compacted Kafka changelog topic for durable partition recovery.
-- Fault recovery: When a worker fails, its partitions are reassigned to surviving workers and active/finalized state is restored from changelog.
+- Embedded RocksDB local state store backed by a Kafka changelog topic for effectively-once recovery (at-least-once + idempotent state; RPO/RTO measured per deployment, not pre-claimed).
+- Fault recovery: When worker #4 fails, partition 5 is reassigned to surviving workers with lowest load and state is restored from WAL.
 
 Answer the user's question clearly, objectively, and authoritatively with engineering precision.`;
 
@@ -504,7 +504,7 @@ Each worker maintains an embedded RocksDB key-value store.
 - Writes first land in an active **MemTable** (skiplist in RAM) and append to an on-disk Write-Ahead Log (WAL).
 - Concurrently, all state mutations are dual-written to a Kafka changelog topic.
 - When full, MemTables become immutable and flush to Level-0 SSTables.
-- In the event of a worker crash (e.g. Worker #4 SIGKILL), the standby worker initializes a clean RocksDB instance and replays the Kafka changelog from the last committed offset, achieving **RPO = 0** and **RTO < 50ms**.`;
+- In the event of a worker crash (e.g. Worker #4 SIGKILL), the replacement worker replays the Kafka changelog with idempotent seq checks (effectively-once result; recovery time measured, not pre-claimed).`;
     } else if (qLower.includes('rebalance') || qLower.includes('sticky') || qLower.includes('partition')) {
       answer = `**Cooperative Sticky Partition Assignor:**
 Unlike naive round-robin or range rebalancers that revoke all partitions (causing complete cache churn and pipeline stalls), StreamForge uses **Cooperative Sticky Rebalancing**:

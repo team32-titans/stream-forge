@@ -37,13 +37,31 @@ app.add_middleware(
 @app.get("/api/health")
 def health():
     s = get_settings()
+    kafka_status = "unknown"
+    try:
+        from confluent_kafka.admin import AdminClient
+
+        admin = AdminClient({"bootstrap.servers": s.kafka_bootstrap_servers, "socket.timeout.ms": 2000})
+        md = admin.list_topics(timeout=2)
+        kafka_status = "available" if (md.brokers and len(md.brokers) > 0) else "unavailable"
+    except Exception:
+        kafka_status = "unavailable"
+    import os as _os
+
+    storage_status = "available" if _os.path.isdir(s.rocksdb_base_path) else "no_local_state"
+    degraded = kafka_status != "available"
     return {
-        "status": "healthy",
+        "status": "degraded" if degraded else "healthy",
         "service": "streamforge_api",
         "version": "1.0.0",
         "kafka_bootstrap": s.kafka_bootstrap_servers,
+        "kafka": kafka_status,
+        "storage": storage_status,
         "storage_mode": s.storage_mode,
         "partitions": s.kafka_partitions,
+        "note": "API alive. Kafka/state report real availability; degraded means dependents unavailable."
+        if degraded
+        else "API alive with Kafka reachable.",
     }
 
 
@@ -70,39 +88,53 @@ def api_metrics():
 
 @app.get("/api/workers")
 def workers():
+    # Separate configured target from actually observed workers.
+    # Observed membership requires Kafka consumer-group query; without a
+    # broker we return explicit unknown — never fabricate "20 running".
     s = get_settings()
-    observed_workers = None
-    broker_count = 0
-    group_error = None
+    brokers = 0
+    observed: Any = "unknown"
+    assignments: Any = "unknown"
+    kafka_status = "unavailable"
     try:
         from confluent_kafka.admin import AdminClient
 
-        admin = AdminClient({"bootstrap.servers": s.kafka_bootstrap_servers})
+        admin = AdminClient({"bootstrap.servers": s.kafka_bootstrap_servers, "socket.timeout.ms": 2000})
         md = admin.list_topics(timeout=2)
-        broker_count = len(md.brokers) if md.brokers else 0
-        # Best-effort consumer group query
-        try:
-            groups = admin.list_consumer_groups(timeout=3)
-            for g in groups.result().valid:
-                if g.group_id == s.kafka_consumer_group:
-                    desc = admin.describe_consumer_groups([g.group_id])
-                    for gid, fut in desc.items():
-                        gd = fut.result()
-                        observed_workers = len(gd.members)
-                    break
-        except Exception as e:
-            group_error = str(e)
-    except Exception as e:
-        group_error = str(e)
+        brokers = len(md.brokers) if md.brokers else 0
+        if brokers > 0:
+            kafka_status = "available"
+            try:
+                groups = admin.list_consumer_groups(timeout=3)
+                result = groups.result() if hasattr(groups, "result") else groups
+                valid = getattr(result, "valid", []) or []
+                for g in valid:
+                    if getattr(g, "group_id", "") == s.kafka_consumer_group:
+                        try:
+                            desc = admin.describe_consumer_groups([s.kafka_consumer_group], request_timeout=3)
+                            fut = desc.get(s.kafka_consumer_group)
+                            gd = fut.result() if fut is not None and hasattr(fut, "result") else None
+                            members = getattr(gd, "members", None)
+                            observed = len(members) if members is not None else "available-see-group"
+                        except Exception:
+                            observed = "available-see-group"
+                        break
+            except Exception:
+                observed = "unknown"
+        else:
+            observed = "unknown"
+    except Exception:
+        brokers = 0
+        observed = "unknown"
     return {
         "target_workers": s.target_workers,
-        "observed_workers": observed_workers,  # None means unknown, int means observed
+        "observed_workers": observed,
+        "assignments": assignments,
+        "kafka": kafka_status,
         "storage_mode": s.storage_mode,
-        "kafka_brokers": broker_count,
-        "consumer_group": s.kafka_consumer_group,
+        "kafka_brokers": brokers,
         "exporter": {"counters": exporter.counters, "gauges": exporter.gauges},
-        "note": "observed_workers is null when Kafka broker is unreachable or consumer group query fails."
-               + (f" Error: {group_error}" if group_error else ""),
+        "note": "target_workers is configured scale; observed_workers requires a reachable Kafka group query. 'unknown' means unavailable, not zero.",
     }
 
 
@@ -113,7 +145,7 @@ def partitions():
         from confluent_kafka.admin import AdminClient
 
         admin = AdminClient({"bootstrap.servers": s.kafka_bootstrap_servers})
-        md = admin.list_topics(timeout=2)
+        md = admin.list_topics(timeout=5)
         t = md.topics.get(s.kafka_topic)
         if t is None:
             raise HTTPException(404, f"topic {s.kafka_topic} not found")
@@ -124,10 +156,12 @@ def partitions():
     except HTTPException:
         raise
     except Exception as e:
-        # Fallback: return expected shape without broker
+        # Honest degraded state: no invented leaders.
         return {
             "topic": s.kafka_topic,
-            "partitions": [{"partitionId": i, "leader": -1, "error": f"broker unavailable: {e}"} for i in range(s.kafka_partitions)],
+            "status": "degraded",
+            "kafka": "unavailable",
+            "partitions": [{"partitionId": i, "leader": None, "status": "unknown", "error": f"broker unavailable: {e}"} for i in range(s.kafka_partitions)],
             "warning": str(e),
         }
 
@@ -168,14 +202,53 @@ def telemetry(limit: int = 20):
 
 @app.get("/api/windows/{truck_id}")
 def windows(truck_id: str):
-    # Scan RocksDB across partitions for keys prefix truck_id
+    # Distributed read path: worker state lives in per-partition RocksDB on
+    # workers + the Kafka changelog. The API host can only see local copies;
+    # reconstruct from the changelog topic in production, scan local RocksDB
+    # in demo. Always label the source honestly.
     s = get_settings()
+    if s.storage_mode == "production":
+        try:
+            from confluent_kafka import Consumer
+
+            conf = {
+                "bootstrap.servers": s.kafka_bootstrap_servers,
+                "group.id": "api-windows-reader",
+                "auto.offset.reset": "earliest",
+                "enable.auto.commit": False,
+            }
+            c = Consumer(conf)
+            c.subscribe([s.kafka_changelog_topic])
+            results = []
+            idle = 0
+            while len(results) < 200 and idle < 4:
+                msg = c.poll(0.5)
+                if msg is None:
+                    idle += 1
+                    continue
+                if msg.error():
+                    continue
+                try:
+                    payload = json.loads(msg.value().decode("utf-8"))
+                except Exception:
+                    continue
+                key = str(payload.get("key", ""))
+                if not key.startswith(f"{truck_id}:") and f"{truck_id}:" not in key:
+                    continue
+                results.append({"partition": payload.get("partition"), "key": key, "value": payload.get("value")})
+            try:
+                c.close()
+            except Exception:
+                pass
+            return {"mode": "LIVE", "truck_id": truck_id, "windows": results, "count": len(results), "source": "kafka_changelog_topic"}
+        except Exception as e:
+            return {"mode": "LIVE", "status": "degraded", "truck_id": truck_id, "windows": [], "warning": f"changelog unavailable: {e}"}
     results = []
     import os
 
     base = s.rocksdb_base_path
     if not os.path.isdir(base):
-        return {"truck_id": truck_id, "windows": [], "note": "no RocksDB data on API host (workers hold state)"}
+        return {"mode": "DEMO", "truck_id": truck_id, "windows": [], "note": "no RocksDB data on API host (workers hold state)"}
     from streamforge.state.rocksdb_store import RocksDBStateStore
 
     limit_total = 200
@@ -194,7 +267,7 @@ def windows(truck_id: str):
             store.close()
         except Exception:
             continue
-    return {"truck_id": truck_id, "windows": results, "count": len(results), "limit": limit_total}
+    return {"mode": "DEMO", "truck_id": truck_id, "windows": results, "count": len(results), "limit": limit_total, "source": "api_host_local_rocksdb_demo_only"}
 
 
 @app.get("/api/state/{partition}")
@@ -224,24 +297,76 @@ def state_partition(partition: int, prefix: str = "", limit: int = 50):
 
 @app.get("/api/changelog")
 def changelog(partition: int = 0, limit: int = 50):
-    s = get_settings()
+    """Production reads the Kafka changelog topic (read-only consumer).
+
+    Demo/test modes return the API-process in-memory mirror explicitly
+    labelled as demo. Never present API-process memory as Kafka data.
+    """
+    from streamforge.config import get_settings as _gs
+
+    s = _gs()
+    limit = max(1, min(200, limit))
     if s.storage_mode == "production":
-        # In production, the changelog lives in the Kafka compacted topic
-        # streamforge.truck_state.changelog. The API process does not maintain
-        # an in-memory replica — reading it requires a Kafka consumer or
-        # querying individual workers.
-        return {
-            "partition": partition,
-            "changelog_topic": s.kafka_changelog_topic,
-            "count": 0,
-            "records": [],
-            "note": "Production changelog lives in Kafka compacted topic. "
-                    "Use kafka-console-consumer or worker /metrics to inspect state. "
-                    "This API process does not maintain a local replica.",
-        }
-    # Demo / test mode: return records from a shared in-memory changelog if any
-    # exist in this process (they generally won't unless the API process also
-    # runs workers, which only happens in demo/test mode).
+        try:
+            from confluent_kafka import Consumer
+
+            conf = {
+                "bootstrap.servers": s.kafka_bootstrap_servers,
+                "group.id": "api-changelog-reader",
+                "auto.offset.reset": "earliest",
+                "enable.auto.commit": False,
+            }
+            c = Consumer(conf)
+            c.subscribe([s.kafka_changelog_topic])
+            recs: List[Dict[str, Any]] = []
+            idle = 0
+            import json as _json
+
+            while len(recs) < limit and idle < 4:
+                msg = c.poll(0.5)
+                if msg is None:
+                    idle += 1
+                    continue
+                if msg.error():
+                    continue
+                try:
+                    payload = _json.loads(msg.value().decode("utf-8"))
+                except Exception:
+                    continue
+                if int(payload.get("partition", -1)) != partition:
+                    continue
+                recs.append(
+                    {
+                        "key": payload.get("key"),
+                        "changelog_key": payload.get("changelog_key"),
+                        "seq": payload.get("seq"),
+                        "offset": payload.get("offset"),
+                        "op": payload.get("op"),
+                        "worker": payload.get("worker_source"),
+                        "timestamp": payload.get("timestamp"),
+                    }
+                )
+            try:
+                c.close()
+            except Exception:
+                pass
+            return {
+                "mode": "LIVE",
+                "partition": partition,
+                "changelog_topic": s.kafka_changelog_topic,
+                "count": len(recs),
+                "records": recs[-limit:],
+            }
+        except Exception as e:
+            return {
+                "mode": "LIVE",
+                "status": "degraded",
+                "partition": partition,
+                "changelog_topic": s.kafka_changelog_topic,
+                "count": 0,
+                "records": [],
+                "warning": f"Kafka changelog unavailable: {e}",
+            }
     from streamforge.state.changelog_manager import ChangelogManager
 
     cm = ChangelogManager()
@@ -249,6 +374,7 @@ def changelog(partition: int = 0, limit: int = 50):
     # Return last N
     tail = recs[-limit:] if len(recs) > limit else recs
     return {
+        "mode": "DEMO",
         "partition": partition,
         "changelog_topic": cm.changelog_topic,
         "count": len(recs),
@@ -256,17 +382,24 @@ def changelog(partition: int = 0, limit: int = 50):
             {"key": r.key, "changelog_key": r.changelog_key, "seq": r.seq, "offset": r.offset, "op": r.op, "worker": r.worker_source, "timestamp": r.timestamp}
             for r in tail
         ],
-        "mode": "demo",
+        "note": "DEMO mode: API-process in-memory mirror, not Kafka data.",
     }
 
 
 @app.post("/api/chaos/kill-worker/{worker_id}")
 def kill_worker(worker_id: str):
-    # In Docker deployment, this would docker kill; here we simulate via rebalancer + log
+    # Honest chaos endpoint: the API cannot physically kill a worker without
+    # an external orchestrator (docker kill / k8s delete). This records the
+    # failure-signal request; real termination must be performed externally.
     import logging
 
     logging.getLogger("streamforge.api.chaos").warning(f"Chaos kill requested for {worker_id}")
-    return {"status": "requested", "worker_id": worker_id, "note": "In Docker mode, compose kill is performed externally. This endpoint logs intent and increments recovery metric."}
+    return {
+        "status": "requested",
+        "worker_id": worker_id,
+        "executed": False,
+        "note": "Failure signal recorded only — NOT executed. Terminate the worker externally (e.g. `docker stop <worker>`) and observe Kafka rebalance + changelog replay via /api/workers.",
+    }
 
 
 # WebSocket broadcast

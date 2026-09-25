@@ -220,7 +220,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <div class="card" style="margin-bottom: 24px;">
     <div class="section-title">
-      <span>32-Partition Spectrum Ribbon (CRC32 Hash Allocation)</span>
+      <span>32-Partition Spectrum Ribbon (CRC32 truck_id % 32)</span>
       <span style="font-size: 12px; color: var(--muted);">Partitions P00 – P31</span>
     </div>
     <div class="spectrum-bar" id="spectrum-grid"></div>
@@ -476,7 +476,7 @@ def run_chaos_demo() -> None:
     print(f"\n[STEP 5] Verification of Recovered State in '{new_owner}':")
     print(f"  >> Recovered Payload: {recovered}")
     assert recovered == payload, "State mismatch detected during failover!"
-    print("  >> STATE RECOVERY CONFIRMED: 100% changelog state recovered.")
+    print("  >> State matches after replay (effectively-once: at-least-once + idempotent seq check). RPO/RTO measured per deployment.")
     print("=" * 75)
     store_recovery.close()
 

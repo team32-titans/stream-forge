@@ -17,6 +17,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
+import { IS_DEMO } from '../lib/api';
 import { ChangelogRecord, WindowAggregate } from '../types/stream';
 
 export const RocksDBInspector: React.FC = () => {
@@ -24,10 +25,33 @@ export const RocksDBInspector: React.FC = () => {
   const [aggregates, setAggregates] = useState<Map<string, WindowAggregate>>(
     new Map(streamSimulation.activeWindowAggregates)
   );
+  const [liveChangelog, setLiveChangelog] = useState<any>(null);
+  const [liveState, setLiveState] = useState<any>(null);
   const [searchKey, setSearchKey] = useState<string>('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!IS_DEMO) {
+      let cancelled = false;
+      const load = async () => {
+        try {
+          const [c, s] = await Promise.all([
+            fetch('/api/changelog?partition=0&limit=10').then((r) => r.json()).catch(() => null),
+            fetch('/api/state/0?limit=10').then((r) => r.json()).catch(() => null),
+          ]);
+          if (!cancelled) {
+            setLiveChangelog(c);
+            setLiveState(s);
+          }
+        } catch {}
+      };
+      load();
+      const t = window.setInterval(load, 5000);
+      return () => {
+        cancelled = true;
+        window.clearInterval(t);
+      };
+    }
     const unsubscribe = streamSimulation.subscribe(() => {
       setChangelog([...streamSimulation.changelogRecords]);
       setAggregates(new Map(streamSimulation.activeWindowAggregates));
@@ -45,8 +69,29 @@ export const RocksDBInspector: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Header Overview Bento Card */}
-      <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+      <div
+        className={`px-4 py-2 rounded-xl border text-[11px] font-mono font-bold uppercase tracking-widest ${
+          IS_DEMO ? 'bg-amber-500/10 border-amber-500/40 text-amber-300' : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+        }`}
+      >
+        {IS_DEMO
+          ? 'DEMO MODE — simulated RocksDB/changelog below.'
+          : 'LIVE MODE — real /api/state + /api/changelog below (simulation disabled).'}
+      </div>
+      {!IS_DEMO && (
+        <div className="bg-[#111827] border border-emerald-500/40 rounded-3xl p-6 shadow-xl space-y-3">
+          <h3 className="text-xs font-bold uppercase tracking-widest text-white">Live state (partition 0) + changelog (partition 0)</h3>
+          <pre className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] font-mono text-[11px] text-emerald-300 overflow-x-auto max-h-72 overflow-y-auto">
+            {JSON.stringify({ state: liveState ?? 'Waiting for backend…', changelog: liveChangelog ?? 'Waiting for backend…' }, null, 2)}
+          </pre>
+          <p className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">
+            Source: Kafka changelog topic in production; API-process memory is DEMO-only and never presented as live.
+          </p>
+        </div>
+      )}
+      {IS_DEMO && (<>
+      {/* Header Overview Bento Card (DEMO) */}
+      <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.3)]">
@@ -57,7 +102,7 @@ export const RocksDBInspector: React.FC = () => {
                 <h2 className="text-base font-bold text-white tracking-tight">
                   ROCKSDB LSM-TREE STATE STORE & CHANGELOG MIRROR
                 </h2>
-                <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 font-mono font-bold border border-slate-700 uppercase tracking-wider">
+                <span className="text-[9px] px-2 py-0.5 rounded-full bg-[#16202e] text-amber-300 font-mono font-bold border border-[#223348] uppercase tracking-wider">
                   Sub-ms Local State
                 </span>
               </div>
@@ -68,7 +113,7 @@ export const RocksDBInspector: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 text-xs font-mono">
-            <div className="bg-[#05070a] px-4 py-2 rounded-2xl border border-slate-700/60 text-slate-300">
+            <div className="bg-[#0a0c10] px-4 py-2 rounded-2xl border border-[#223348] text-slate-300">
               Active Keys in State: <span className="text-amber-400 font-bold">{aggregates.size}</span>
             </div>
           </div>
@@ -76,30 +121,30 @@ export const RocksDBInspector: React.FC = () => {
       </div>
 
       {/* LSM-Tree Architecture Diagram & Data Flow */}
-      <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl">
-        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-300 mb-4 flex items-center gap-2">
+      <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl">
+        <h3 className="text-xs font-bold uppercase tracking-widest text-white mb-4 flex items-center gap-2">
           <Layers className="w-4 h-4 text-indigo-400" />
           RocksDB In-Memory vs. Disk vs. Kafka Replication Tier
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           {/* Tier 1: Write-Ahead Log (WAL) */}
-          <div className="bg-[#05070a] p-4 rounded-2xl border border-slate-700/50 relative">
+          <div className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] relative">
             <div className="text-[10px] uppercase font-bold text-rose-400 flex items-center justify-between mb-1">
               <span>1. Write-Ahead Log</span>
               <span className="text-[9px] px-1.5 py-0.5 bg-rose-500/20 text-rose-300 rounded font-mono">Disk Append</span>
             </div>
             <div className="text-xs font-semibold text-slate-200">Sequential Append-Only</div>
             <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-              Guarantees zero data loss if power fails before MemTable flush.
+              WAL + MemTable flush ordering; durability depends on sync policy (see config). Demo illustrates the path.
             </p>
-            <div className="mt-3 text-[10px] font-mono text-slate-400 bg-slate-900/60 p-2 rounded-xl border border-slate-800">
+            <div className="mt-3 text-[10px] font-mono text-slate-400 bg-[#16202e] p-2 rounded-xl border border-[#223348]">
               wal_offset: <span className="text-rose-300 font-bold">#45,820</span>
             </div>
           </div>
 
           {/* Tier 2: MemTable (RAM) */}
-          <div className="bg-[#05070a] p-4 rounded-2xl border border-indigo-500/40 relative shadow-lg shadow-indigo-950/20">
+          <div className="bg-[#0a0c10] p-4 rounded-2xl border border-indigo-500/40 relative shadow-lg shadow-indigo-950/20">
             <div className="text-[10px] uppercase font-bold text-indigo-400 flex items-center justify-between mb-1">
               <span>2. Active MemTable</span>
               <span className="text-[9px] px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 rounded font-mono">RAM Skiplist</span>
@@ -108,14 +153,14 @@ export const RocksDBInspector: React.FC = () => {
             <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
               Sub-microsecond point reads & updates for 50,000 truck rolling averages.
             </p>
-            <div className="mt-3 text-[10px] font-mono text-slate-400 bg-slate-900/60 p-2 rounded-xl border border-slate-800 flex justify-between">
+            <div className="mt-3 text-[10px] font-mono text-slate-400 bg-[#16202e] p-2 rounded-xl border border-[#223348] flex justify-between">
               <span>Size: <span className="text-indigo-300">64 MB Buffer</span></span>
               <span>Hits: <span className="text-emerald-400 font-bold">99.1%</span></span>
             </div>
           </div>
 
           {/* Tier 3: Immutable MemTable & SSTable (L0/L1) */}
-          <div className="bg-[#05070a] p-4 rounded-2xl border border-slate-700/50 relative">
+          <div className="bg-[#0a0c10] p-4 rounded-2xl border border-[#223348] relative">
             <div className="text-[10px] uppercase font-bold text-amber-400 flex items-center justify-between mb-1">
               <span>3. SSTable Files (L0/L1)</span>
               <span className="text-[9px] px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded font-mono">NVMe Disk</span>
@@ -124,22 +169,22 @@ export const RocksDBInspector: React.FC = () => {
             <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
               Background compaction merges duplicate updates into immutable blocks.
             </p>
-            <div className="mt-3 text-[10px] font-mono text-slate-400 bg-slate-900/60 p-2 rounded-xl border border-slate-800">
+            <div className="mt-3 text-[10px] font-mono text-slate-400 bg-[#16202e] p-2 rounded-xl border border-[#223348]">
               L0 Tables: <span className="text-amber-300 font-bold">4 files (Block Cache 256MB)</span>
             </div>
           </div>
 
           {/* Tier 4: Kafka Compacted Changelog */}
-          <div className="bg-[#05070a] p-4 rounded-2xl border border-emerald-500/40 relative">
+          <div className="bg-[#0a0c10] p-4 rounded-2xl border border-emerald-500/40 relative">
             <div className="text-[10px] uppercase font-bold text-emerald-400 flex items-center justify-between mb-1">
               <span>4. Kafka Changelog</span>
               <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded font-mono">Cluster Sync</span>
             </div>
             <div className="text-xs font-semibold text-slate-200">Compacted Topic</div>
             <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-              Replayed by replacement worker during partition failover in &lt;800ms.
+              Replacement worker replays the changelog topic (measured failover, no pre-claimed RTO).
             </p>
-            <div className="mt-3 text-[10px] font-mono text-slate-400 bg-slate-900/60 p-2 rounded-xl border border-slate-800">
+            <div className="mt-3 text-[10px] font-mono text-slate-400 bg-[#16202e] p-2 rounded-xl border border-[#223348]">
               Topic: <span className="text-emerald-300">streamforge.truck_state</span>
             </div>
           </div>
@@ -149,12 +194,12 @@ export const RocksDBInspector: React.FC = () => {
       {/* State Inspector & Live Changelog Stream */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Left Column: Key-Value State Explorer */}
-        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl flex flex-col justify-between">
+        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-3.5 border-b border-slate-700/50 pb-3">
+            <div className="flex items-center justify-between mb-3.5 border-b border-[#223348] pb-3">
               <div className="flex items-center gap-2">
                 <Search className="w-4 h-4 text-indigo-400" />
-                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-200">
+                <h4 className="text-xs font-bold uppercase tracking-widest text-white">
                   RocksDB State Key Browser (Truck States)
                 </h4>
               </div>
@@ -166,7 +211,7 @@ export const RocksDBInspector: React.FC = () => {
                 placeholder="Search Truck ID (e.g. TRK-04936)..."
                 value={searchKey}
                 onChange={(e) => setSearchKey(e.target.value)}
-                className="w-full bg-[#05070a] border border-slate-700/50 rounded-2xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+                className="w-full bg-[#0a0c10] border border-[#223348] rounded-2xl px-4 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
               />
             </div>
 
@@ -179,7 +224,7 @@ export const RocksDBInspector: React.FC = () => {
                   className={`p-3 rounded-2xl border text-xs cursor-pointer transition flex items-center justify-between font-mono ${
                     activeDetail?.truckId === agg.truckId
                       ? 'bg-indigo-600/20 border-indigo-500 text-indigo-200 shadow-[0_0_12px_rgba(99,102,241,0.2)]'
-                      : 'bg-[#05070a] border-slate-700/40 text-slate-300 hover:border-slate-600'
+                      : 'bg-[#0a0c10] border-[#223348] text-slate-300 hover:border-slate-500'
                   }`}
                 >
                   <span className="font-bold text-white">{agg.truckId}</span>
@@ -200,12 +245,12 @@ export const RocksDBInspector: React.FC = () => {
 
           {/* Key Value Payload View */}
           {activeDetail && (
-            <div className="mt-4 pt-3.5 border-t border-slate-700/50">
-              <div className="text-[11px] font-bold text-slate-300 mb-2 flex items-center justify-between">
+            <div className="mt-4 pt-3.5 border-t border-[#223348]">
+              <div className="text-[11px] font-bold text-white mb-2 flex items-center justify-between">
                 <span>Serialized State Payload for [{activeDetail.truckId}]</span>
                 <span className="font-mono text-indigo-400 text-[10px]">Key: truck:{activeDetail.truckId}:window</span>
               </div>
-              <pre className="bg-[#05070a] p-3.5 rounded-2xl border border-slate-700/50 text-[11px] font-mono text-indigo-300 overflow-x-auto">
+              <pre className="bg-[#0a0c10] p-3.5 rounded-2xl border border-[#223348] text-[11px] font-mono text-indigo-300 overflow-x-auto">
 {JSON.stringify(
   {
     truck_id: activeDetail.truckId,
@@ -228,12 +273,12 @@ export const RocksDBInspector: React.FC = () => {
         </div>
 
         {/* Right Column: Kafka Compacted Changelog Topic Stream */}
-        <div className="bg-[#111620]/60 backdrop-blur-sm border border-slate-700/40 rounded-3xl p-6 shadow-xl flex flex-col justify-between">
+        <div className="bg-[#111827] border border-[#1e293b] rounded-3xl p-6 shadow-xl flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-3.5 border-b border-slate-700/50 pb-3">
+            <div className="flex items-center justify-between mb-3.5 border-b border-[#223348] pb-3">
               <div className="flex items-center gap-2">
                 <Radio className="w-4 h-4 text-emerald-400" />
-                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-200">
+                <h4 className="text-xs font-bold uppercase tracking-widest text-white">
                   Live Kafka Changelog Stream
                 </h4>
               </div>
@@ -246,7 +291,7 @@ export const RocksDBInspector: React.FC = () => {
               {changelog.slice(0, 10).map((rec, idx) => (
                 <div
                   key={idx}
-                  className="bg-[#05070a] p-3 rounded-2xl border border-slate-700/50 font-mono text-xs space-y-1"
+                  className="bg-[#0a0c10] p-3 rounded-2xl border border-[#223348] font-mono text-xs space-y-1"
                 >
                   <div className="flex items-center justify-between text-[10px]">
                     <span className="text-slate-400">
@@ -262,7 +307,7 @@ export const RocksDBInspector: React.FC = () => {
                     <span className="text-slate-400 text-[10px]">{rec.workerSource}</span>
                   </div>
 
-                  <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1.5 border-t border-slate-800">
+                  <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1.5 border-t border-[#223348]">
                     <span>Count: {rec.value.count}</span>
                     <span>Sum: {rec.value.sum}</span>
                     <span className="text-emerald-400 font-bold">Avg: {rec.value.avg}°C</span>
@@ -272,14 +317,15 @@ export const RocksDBInspector: React.FC = () => {
             </div>
           </div>
 
-          <div className="mt-4 pt-3 border-t border-slate-700/50 text-[10px] text-slate-400 flex items-center justify-between font-mono">
+          <div className="mt-4 pt-3 border-t border-[#223348] text-[10px] text-slate-400 flex items-center justify-between font-mono">
             <span className="flex items-center gap-1.5 text-emerald-400">
-              <CheckCircle2 className="w-3.5 h-3.5" /> Auto-Compaction Active
+              <CheckCircle2 className="w-3.5 h-3.5" /> Demo mirror (compaction simulated)
             </span>
-            <span className="uppercase tracking-wider">Retention: Compact By Key</span>
+            <span className="uppercase tracking-wider">Retention: Compact By Key (demo)</span>
           </div>
         </div>
       </div>
+      </>)}
     </div>
   );
 };

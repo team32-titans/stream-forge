@@ -2,6 +2,9 @@ version: '3.8'
 
 
 services:
+  # Single-process demo engine only. Multi-worker deployments must use
+  # infra/docker-compose.workers.yml (ephemeral tmpfs per worker, recovery via
+  # Kafka changelog) — never mount one RocksDB path into multiple workers.
   streamforge-engine:
     build: .
     container_name: streamforge_cluster

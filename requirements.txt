@@ -19,5 +19,5 @@ python-dotenv>=1.0.0
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 
-# Embedded LSM-Tree RocksDB backend (required only for STORAGE_MODE=production on Linux/Docker)
-# rocksdict>=0.3.28
+# Embedded LSM-Tree RocksDB backend (required for STORAGE_MODE=production)
+rocksdict>=0.3.28

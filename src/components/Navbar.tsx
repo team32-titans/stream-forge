@@ -22,7 +22,8 @@ import {
   Zap,
 } from 'lucide-react';
 import { streamSimulation } from '../engine/simulationEngine';
-import { streamApi, ConnectionStatus } from '../lib/api';
+import { streamApi, ConnectionStatus, IS_DEMO } from '../lib/api';
+import { useLiveMetrics } from '../hooks/useLiveMetrics';
 import { StreamMetrics } from '../types/stream';
 
 interface NavbarProps {
@@ -34,9 +35,12 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
   const [metrics, setMetrics] = useState<StreamMetrics>(streamSimulation.metrics);
   const [isRunning, setIsRunning] = useState<boolean>(streamSimulation.getIsRunning());
   const [rate, setRate] = useState<number>(streamSimulation.getRate());
-  const [streamMode, setStreamMode] = useState<'live' | 'demo'>('live');
+  const [streamMode, setStreamMode] = useState<'live' | 'demo'>(IS_DEMO ? 'demo' : 'live');
   const [apiLatency, setApiLatency] = useState<number>(streamApi.getLatency());
   const [connStatus, setConnStatus] = useState<ConnectionStatus>(streamSimulation.connectionStatus);
+  const live = useLiveMetrics(2000);
+  const liveGauges = live.data?.gauges ?? {};
+  const liveCounters = live.data?.counters ?? {};
 
   useEffect(() => {
     const unsubSim = streamSimulation.subscribe(() => {
@@ -175,28 +179,50 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
             </div>
           </div>
 
-          {/* Live Bento Metrics Ticker */}
+          {/* Live Bento Metrics Ticker — LIVE reads backend, DEMO reads simulation */}
           <div className="hidden xl:flex items-center gap-5 bg-[#16202e] px-4 py-1.5 rounded-xl border border-[#223348]">
             <div className="text-left">
               <p className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Health</p>
-              <span className="text-emerald-400 font-mono text-xs font-bold">{metrics.activeWorkers > 0 ? ((metrics.healthyWorkers / metrics.activeWorkers) * 100).toFixed(1) : '—'}%</span>
+              {IS_DEMO || streamMode === 'demo' ? (
+                <span className="text-amber-400 font-mono text-xs font-bold" title="Demo simulation value">DEMO</span>
+              ) : live.live ? (
+                <span className="text-emerald-400 font-mono text-xs font-bold">LIVE</span>
+              ) : (
+                <span className="text-slate-400 font-mono text-xs font-bold" title="Backend unreachable">Unavailable</span>
+              )}
             </div>
             <div className="h-6 w-px bg-[#223348]" />
             <div className="text-left">
               <p className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Workers</p>
-              <p className="text-white font-mono text-xs font-bold">{metrics.healthyWorkers} / 20</p>
+              <p className="text-white font-mono text-xs font-bold">
+                {IS_DEMO || streamMode === 'demo'
+                  ? `${metrics.healthyWorkers} / 20 (demo)`
+                  : live.live
+                    ? `${liveGauges['streamforge_active_workers'] ?? '?'} / 20 (live)`
+                    : 'Unavailable'}
+              </p>
             </div>
             <div className="h-6 w-px bg-[#223348]" />
             <div className="text-left">
               <p className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Rate</p>
               <p className="text-indigo-400 font-mono text-xs font-bold">
-                {(metrics.currentThroughput / 1000).toFixed(1)}k/s
+                {IS_DEMO || streamMode === 'demo'
+                  ? `${(metrics.currentThroughput / 1000).toFixed(1)}k/s (demo)`
+                  : live.live
+                    ? `${(((liveGauges['streamforge_events_per_second'] ?? 0) as number) / 1000).toFixed(1)}k/s (live)`
+                    : 'Unavailable'}
               </p>
             </div>
             <div className="h-6 w-px bg-[#223348]" />
             <div className="text-left">
               <p className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">p99</p>
-              <p className="text-cyan-400 font-mono text-xs font-bold">{metrics.p99LatencyMs}ms</p>
+              <p className="text-cyan-400 font-mono text-xs font-bold">
+                {IS_DEMO || streamMode === 'demo'
+                  ? `${metrics.p99LatencyMs}ms (demo)`
+                  : live.live
+                    ? `${liveGauges['streamforge_p99_latency_ms'] ?? '?'}ms (live)`
+                    : 'Unavailable'}
+              </p>
             </div>
           </div>
 
@@ -225,8 +251,9 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
                 className={`px-2 py-0.5 rounded text-xs font-mono transition ${
                   rate === 100000 ? 'bg-orange-500 text-white font-bold' : 'text-slate-400 hover:text-slate-200'
                 }`}
+                title="Demo simulation rate target (not measured Kafka throughput)"
               >
-                ⚡ 100k
+                ⚡ 100k*
               </button>
             </div>
 

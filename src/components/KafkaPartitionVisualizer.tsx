@@ -402,7 +402,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
             {totalThroughput.toLocaleString()} msgs/s
           </div>
           <div className="text-[10px] text-slate-400 mt-0.5">
-            Murmur2(truck_id) % 32
+            CRC32(truck_id) % 32 (demo)
           </div>
         </div>
 
@@ -793,7 +793,7 @@ export const KafkaPartitionVisualizer: React.FC<KafkaPartitionVisualizerProps> =
                     </div>
                     <div className="flex justify-between text-[11px]">
                       <span className="text-slate-400">WAL Changelog Mirror:</span>
-                      <span className="text-emerald-400 font-bold">In-Sync (RPO=0)</span>
+                      <span className="text-emerald-400 font-bold">Demo mirror in-sync</span>
                     </div>
                   </div>
                 )}

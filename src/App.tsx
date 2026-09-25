@@ -28,23 +28,17 @@ export default function App() {
   const [, forceTick] = useState(0);
 
   useEffect(() => {
-    // Only start the simulation tick loop in DEMO mode.
-    // In LIVE mode the streamSimulation object still exists (components read
-    // from it as a shared state bus) but the local tick loop does NOT run —
-    // data comes exclusively from the backend via WebSocket / REST.
-    if (IS_DEMO) {
-      streamSimulation.startSimulation();
-    }
+    // DEMO MODE ONLY: start the in-browser simulation loop.
+    // LIVE mode must NEVER run the simulation — it reads FastAPI/Kafka.
+    if (!IS_DEMO) return;
+    // Start distributed streaming simulation loop on mount (StrictMode-safe).
+    streamSimulation.startSimulation();
     const t = window.setInterval(() => forceTick((x) => x + 1), 1000);
     return () => {
       window.clearInterval(t);
-      if (IS_DEMO) {
-        streamSimulation.stopSimulation();
-      }
+      streamSimulation.stopSimulation();
     };
   }, []);
-
-  const modeLabel = IS_DEMO ? 'demo' : 'live';
 
   return (
     <div className="app-shell min-h-screen bg-[#0a0c10] text-slate-100 flex flex-col antialiased selection:bg-orange-500 selection:text-white">
@@ -52,18 +46,23 @@ export default function App() {
       <div className="app-glow app-glow-2" />
       <div className="app-grid" />
 
-      {/* DEMO mode banner */}
-      {IS_DEMO && (
-        <div className="bg-yellow-500/90 text-black text-xs font-bold text-center py-1.5 relative z-50 uppercase tracking-wider">
-          ⚠ DEMO MODE — Data is simulated via simulationEngine.ts, not from a live Kafka cluster
-        </div>
-      )}
-
       {/* Top Navigation & Metrics Bar */}
       <Navbar activeTab={activeTab} setActiveTab={setActiveTab} />
 
       {/* Main Interactive Workspace Content */}
       <main className="app-main flex-1 max-w-7xl w-full mx-auto px-4 py-4 relative z-10">
+        {/* Explicit mode banner: DEMO uses simulationEngine, LIVE uses FastAPI/Kafka */}
+        <div
+          className={`mb-3 px-4 py-2 rounded-xl border text-[11px] font-mono font-bold uppercase tracking-widest ${
+            IS_DEMO
+              ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+              : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+          }`}
+        >
+          {IS_DEMO
+            ? 'DEMO MODE — simulated data (simulationEngine.ts). Add ?demo removal / LIVE backend for real Kafka.'
+            : 'LIVE MODE — reading FastAPI/Kafka runtime. Simulation disabled.'}
+        </div>
         {activeTab === 'topology' && <TopologyView />}
         {activeTab === 'chaos' && <ChaosStudio />}
         {activeTab === 'aimodel' && <AIModelLab />}
@@ -84,10 +83,10 @@ export default function App() {
             <span className="text-orange-400 font-semibold">Distributed Stateful Engine</span>
           </div>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Uptime: {formatUptime()} ({modeLabel} session)</span>
+            <span>Uptime: {formatUptime()} ({IS_DEMO ? 'demo session' : 'browser session — see /api/health for backend'})</span>
             <span className="text-slate-600">•</span>
             <span className="text-slate-300">
-              Events: {streamSimulation.metrics.totalEventsProcessed.toLocaleString()}
+              Events: {IS_DEMO ? streamSimulation.metrics.totalEventsProcessed.toLocaleString() : 'see Metrics tab (LIVE)'}
             </span>
           </div>
         </div>
@@ -95,3 +94,4 @@ export default function App() {
     </div>
   );
 }
+

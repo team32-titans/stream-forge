@@ -60,6 +60,14 @@ class ChangelogRecord:
 class ChangelogManager:
     """
     Coordinates real-time replication from RocksDB to Kafka and state replay during recovery.
+
+    Modes:
+      - "production": REAL Kafka changelog topic. A confluent_kafka.Producer is
+        constructed at init (fails loudly if the client lib is missing).
+        publish_state_change produces to Kafka with a delivery callback;
+        flush() verifies delivery callbacks + flush success. The source offset
+        is committed only when this succeeds.
+      - "demo"/"test": in-memory changelog (explicitly non-durable).
     """
 
     def __init__(
@@ -73,14 +81,52 @@ class ChangelogManager:
         self.bootstrap_servers = bootstrap_servers
         self.storage_mode = storage_mode
         self._in_memory_changelog: Dict[int, List[ChangelogRecord]] = {}
+        # Optional injected producer (dependency injection for tests/workers
+        # that manage their own client). If not injected in production mode,
+        # a real producer is constructed below (fails loudly if unavailable).
         self._producer = producer
-        self._delivery_errors: List[Any] = []
+        # Delivery-callback accounting (authoritative for commit gating).
+        self._pending_deliveries: int = 0
+        self._delivery_errors: List[str] = []
+        self._produced_ok: int = 0
+        if storage_mode == "production" and self._producer is None:
+            try:
+                from confluent_kafka import Producer
+            except Exception as e:
+                raise RuntimeError(
+                    "STORAGE_MODE=production requires confluent-kafka installed. "
+                    f"Original error: {e}"
+                )
+            conf = {
+                "bootstrap.servers": self.bootstrap_servers,
+                "acks": "all",
+                "enable.idempotence": True,
+                "compression.type": "lz4",
+                "linger.ms": 10,
+                "retries": 5,
+                "retry.backoff.ms": 200,
+            }
+            try:
+                self._producer = Producer(conf)
+            except Exception as e:
+                raise RuntimeError(f"Failed to create Kafka changelog producer: {e}")
 
-    def _delivery_callback(self, err: Any, msg: Any) -> None:
-        """Track asynchronous Kafka delivery report errors."""
+    def _on_delivery(self, err, msg) -> None:
+        self._pending_deliveries = max(0, self._pending_deliveries - 1)
         if err is not None:
-            logger.error(f"Changelog Kafka delivery error: {err}")
-            self._delivery_errors.append(err)
+            self._delivery_errors.append(str(err))
+            logger.error(f"Changelog delivery failed: {err}")
+        else:
+            self._produced_ok += 1
+
+    # Alias kept for compatibility with injected-producer call sites.
+    def _delivery_callback(self, err, msg) -> None:
+        self._on_delivery(err, msg)
+
+    @property
+    def delivery_errors(self) -> List[str]:
+        """Public read access to delivery-error history (commit-gating signal)."""
+        return self._delivery_errors
 
     def publish_state_change(
         self,
@@ -95,6 +141,9 @@ class ChangelogManager:
         """
         Replicate a state update to the Kafka changelog topic.
         Returns the assigned changelog offset. seq = source_offset (durable version).
+        Production: produces to Kafka with delivery-callback tracking; any
+        produce/queue failure raises so the caller blocks the source commit.
+        Demo/test: appends to the in-memory list.
         """
         if partition not in self._in_memory_changelog:
             self._in_memory_changelog[partition] = []
@@ -115,54 +164,56 @@ class ChangelogManager:
             seq=seq,
             op=op,
         )
-        self._in_memory_changelog[partition].append(record)
-
-        # In production mode, also replicate to actual Kafka producer if configured
-        if self._producer is not None:
+        if self.storage_mode == "production":
+            if self._producer is None:
+                raise RuntimeError("Kafka changelog producer not initialized (production mode).")
             try:
+                self._pending_deliveries += 1
                 self._producer.produce(
                     topic=self.changelog_topic,
                     key=record.changelog_key.encode("utf-8"),
                     value=record.serialize(),
-                    on_delivery=self._delivery_callback,
+                    on_delivery=self._on_delivery,
                 )
-                self._producer.poll(0)
+                self._producer.poll(0)  # serve delivery callbacks
             except Exception as e:
-                logger.error(f"Failed to produce changelog record for key {key}: {e}")
-                self._delivery_errors.append(e)
+                self._pending_deliveries = max(0, self._pending_deliveries - 1)
+                self._delivery_errors.append(str(e))
+                logger.error(f"Changelog produce failed p={partition} key={key}: {e}")
                 raise
-
+            # Local mirror kept as read-your-writes cache only; Kafka is authoritative.
+            self._in_memory_changelog[partition].append(record)
+            return offset
+        self._in_memory_changelog[partition].append(record)
         return offset
 
-    def flush(self, timeout: float = 5.0) -> bool:
-        """
-        Flush pending changelog produces and verify all delivery callbacks succeeded.
-        Returns True only if 0 messages remain AND no delivery callbacks reported an error.
+    def flush(self, timeout: float = 5) -> bool:
+        """Flush pending changelog produces. Verifies delivery callbacks.
+
+        Success requires: producer.flush() drains to zero AND no delivery
+        callback reported an error since the last flush. Any failure returns
+        False so the caller MUST NOT commit the source offset.
         """
         if self._delivery_errors:
-            logger.error(f"Changelog has {len(self._delivery_errors)} delivery error(s) before flush")
+            logger.error(f"Changelog delivery errors: {self._delivery_errors[-1]}")
             return False
-        if self._producer is not None:
-            try:
+        if self._pending_deliveries != 0:
+            logger.error(f"Changelog {self._pending_deliveries} deliveries unacknowledged")
+            return False
+        try:
+            if self._producer is not None:
                 remaining = self._producer.flush(timeout)
-                if remaining > 0:
-                    logger.error(f"Changelog flush timed out with {remaining} pending messages")
+                if remaining != 0:
+                    logger.error(f"Changelog flush incomplete: {remaining} messages pending")
                     return False
-                if self._delivery_errors:
-                    logger.error(f"Changelog delivery error reported in flush callback: {self._delivery_errors}")
-                    return False
-            except Exception as e:
-                logger.error(f"Changelog flush failed: {e}")
-                return False
+                return True
+        except Exception as e:
+            logger.error(f"Changelog flush failed: {e}")
+            return False
         return True
 
     def reset_delivery_errors(self) -> None:
-        """Clear delivery errors after recovery or commit failure handling."""
         self._delivery_errors.clear()
-
-    @property
-    def delivery_errors(self) -> List[Any]:
-        return list(self._delivery_errors)
 
     def _existing_seq(self, target_store: StateStore[str, Dict[str, Any]], key: str) -> Optional[int]:
         try:
@@ -184,14 +235,21 @@ class ChangelogManager:
         """
         Replay all changelog records for a newly assigned partition into RocksDB.
         Idempotent: stale records (seq <= existing seq) are skipped.
+        Production with use_kafka_replay=True consumes the compacted changelog
+        topic from OFFSET_BEGINNING (read-only consumer group) and applies
+        records for this partition; falls back to the local mirror only if the
+        broker is unreachable (logged as a warning, mirror count returned).
         Returns count of newly applied records.
         """
+        if use_kafka_replay and self.storage_mode == "production":
+            try:
+                replayed = self._replay_from_kafka(partition, target_store, on_progress)
+                if replayed is not None:
+                    return replayed
+            except Exception as e:
+                logger.warning(f"Kafka changelog replay unavailable p={partition}: {e}; using local mirror")
         records = self._in_memory_changelog.get(partition, [])
         total = len(records)
-        if use_kafka_replay and self.storage_mode == "production":
-            logger.info(f"Restoring Partition {partition} from Kafka changelog (earliest)...")
-            # Production path consumes compacted topic from OFFSET_BEGINNING;
-            # in-memory list mirrors the same ordered replay for demo/test.
         logger.info(f"Restoring Partition {partition} state from changelog ({total} records)...")
 
         restored_count = 0
@@ -212,3 +270,77 @@ class ChangelogManager:
 
         logger.info(f"Partition {partition} state restored: {restored_count}/{total} applied.")
         return restored_count
+
+    def _replay_from_kafka(
+        self,
+        partition: int,
+        target_store: StateStore[str, Dict[str, Any]],
+        on_progress: Optional[Callable[[int, int], None]] = None,
+        max_messages: int = 100_000,
+        poll_timeout: float = 2.0,
+    ) -> Optional[int]:
+        """Consume the compacted changelog topic from beginning (read-only group).
+
+        Returns applied-record count, or None if the broker is unreachable so
+        the caller can fall back to the local mirror (logged). Applies the same
+        idempotent seq<=existing.seq skip rule as mirror replay.
+        """
+        from confluent_kafka import Consumer
+
+        conf = {
+            "bootstrap.servers": self.bootstrap_servers,
+            "group.id": "streamforge-changelog-restore",
+            "auto.offset.reset": "earliest",
+            "enable.auto.commit": False,
+        }
+        consumer = Consumer(conf)
+        consumer.subscribe([self.changelog_topic])
+        applied = 0
+        seen = 0
+        idle_polls = 0
+        try:
+            while seen < max_messages and idle_polls < 3:
+                msg = consumer.poll(poll_timeout)
+                if msg is None:
+                    idle_polls += 1
+                    continue
+                idle_polls = 0
+                if msg.error():
+                    raise RuntimeError(str(msg.error()))
+                try:
+                    payload = json.loads(msg.value().decode("utf-8"))
+                except Exception:
+                    continue
+                if int(payload.get("partition", -1)) != partition:
+                    continue
+                key = str(payload.get("key", ""))
+                value = payload.get("value")
+                seq = payload.get("seq", payload.get("source_offset"))
+                try:
+                    seq_int = int(seq) if seq is not None else None
+                except Exception:
+                    seq_int = None
+                existing = self._existing_seq(target_store, key)
+                if existing is not None and seq_int is not None and seq_int <= existing:
+                    seen += 1
+                    continue
+                op = str(payload.get("op", "PUT"))
+                if value is None or op == "DELETE" or (isinstance(value, dict) and value.get("__DELETED__")):
+                    target_store.delete(key)
+                else:
+                    if isinstance(value, dict) and seq_int is not None:
+                        value = dict(value)
+                        value.setdefault("seq", seq_int)
+                        value.setdefault("source_offset", seq_int)
+                    target_store.put(key, value)
+                applied += 1
+                seen += 1
+                if on_progress and (seen % 100 == 0):
+                    on_progress(seen, seen)
+            logger.info(f"Kafka changelog replay p={partition}: applied {applied}/{seen}")
+            return applied
+        finally:
+            try:
+                consumer.close()
+            except Exception:
+                pass

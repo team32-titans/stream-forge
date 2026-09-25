@@ -956,3 +956,329 @@ class TestChangelogDeliveryCallbackGating:
         # Option B verification: partition passed to produce matches evt.partition exactly
         assert captured["partition"] == 14
         assert captured["key"] == b"TRK-00042"
+
+
+# ============================================================================
+# APPENDED: ACTIVE + WATERMARK DURABLE RECOVERY (RUN A vs RUN B)
+# ============================================================================
+
+BASE_EXTRA = 1709280000000
+
+
+def _extra_evt(truck="TRK-R", ts=BASE_EXTRA + 1000, temp=5.0):
+    return TruckTelemetryEvent(truck_id=truck, timestamp=ts, temperature=temp)
+
+
+class TestActiveRecoveryMidWindow:
+    """Replacement worker continues mid-window aggregation without loss."""
+
+    def test_runA_vs_runB_midwindow_restart(self, tmp_path):
+        from streamforge.workers.worker_process import (
+            _persist_active_state,
+            _restore_processor_state,
+        )
+
+        events = [
+            _extra_evt(ts=BASE_EXTRA + 1000 + i * 10_000, temp=5.0 + (i % 3))
+            for i in range(10)
+        ]
+        a = WindowedRollingAverageProcessor(
+            worker_id="w", window_size_ms=300_000, max_lateness_ms=600_000
+        )
+        for e in events:
+            a.process_event(e)
+        snap_a = a.snapshot_state()
+
+        b1 = WindowedRollingAverageProcessor(
+            worker_id="w", window_size_ms=300_000, max_lateness_ms=600_000
+        )
+        store = RocksDBStateStore(
+            db_path=str(tmp_path / "rec"), partition_id=0, storage_mode="test"
+        )
+        cm = ChangelogManager(storage_mode="test")
+        for e in events[:5]:
+            b1.process_event(e)
+        assert _persist_active_state(b1, store, cm, "w", 0, 4) is True
+        b2 = WindowedRollingAverageProcessor(
+            worker_id="w", window_size_ms=300_000, max_lateness_ms=600_000
+        )
+        cm.restore_partition_state(0, store)
+        _restore_processor_state(b2, store)
+        for e in events[5:]:
+            b2.process_event(e)
+        snap_b = b2.snapshot_state()
+        assert snap_a["active_windows"].keys() == snap_b["active_windows"].keys()
+        for k in snap_a["active_windows"]:
+            assert snap_a["active_windows"][k]["acc"] == snap_b["active_windows"][k]["acc"]
+
+
+class TestWatermarkRestore:
+    def test_watermark_restored_and_late_consistent(self, tmp_path):
+        from streamforge.workers.worker_process import (
+            _persist_active_state,
+            _restore_processor_state,
+        )
+
+        store = RocksDBStateStore(
+            db_path=str(tmp_path / "wm"), partition_id=1, storage_mode="test"
+        )
+        p1 = WindowedRollingAverageProcessor(
+            worker_id="w", window_size_ms=300_000, max_lateness_ms=10_000
+        )
+        p1.process_event(_extra_evt(temp=5.0, ts=BASE_EXTRA + 200_000))
+        wm_before = p1.watermark_gen.last_emitted_watermark
+        cm = ChangelogManager(storage_mode="test")
+        assert _persist_active_state(p1, store, cm, "w", 1, 7) is True
+        p2 = WindowedRollingAverageProcessor(
+            worker_id="w", window_size_ms=300_000, max_lateness_ms=10_000
+        )
+        cm.restore_partition_state(1, store)
+        _restore_processor_state(p2, store)
+        assert p2.watermark_gen.last_emitted_watermark == wm_before
+        p2.process_event(_extra_evt(temp=5.0, ts=BASE_EXTRA + 500_000))
+        assert p2.watermark_gen.is_event_late(BASE_EXTRA + 1000) is True
+
+
+# ============================================================================
+# APPENDED: FILTER EXTRAS (watermark isolation, emitted stats)
+# ============================================================================
+
+
+class TestTemperatureFilterExtra:
+    def test_rejected_does_not_advance_watermark(self):
+        p = WindowedRollingAverageProcessor(
+            worker_id="w", window_size_ms=300_000, max_lateness_ms=15_000
+        )
+        p.process_event(_extra_evt(temp=5.0, ts=BASE_EXTRA + 10_000))
+        wm_before = p.watermark_gen.last_emitted_watermark
+        p.process_event(_extra_evt(temp=-5.0, ts=BASE_EXTRA + 900_000))
+        assert p.watermark_gen.last_emitted_watermark == wm_before
+
+    def test_rejected_not_in_emitted_stats(self):
+        p = WindowedRollingAverageProcessor(
+            worker_id="w", window_size_ms=300_000, max_lateness_ms=10_000
+        )
+        p.process_event(_extra_evt(temp=4.0, ts=BASE_EXTRA + 10_000))
+        p.process_event(_extra_evt(temp=6.0, ts=BASE_EXTRA + 20_000))
+        p.process_event(_extra_evt(temp=-5.0, ts=BASE_EXTRA + 30_000))
+        _, emitted = p.process_telemetry(_extra_evt(temp=5.0, ts=BASE_EXTRA + 320_000))
+        assert len(emitted) == 1
+        assert emitted[0].count == 2
+        assert emitted[0].avg_temperature == 5.0
+
+
+# ============================================================================
+# APPENDED: FLUSH PENDING GATING + ROCKSDB PRODUCTION + LAG HONESTY
+# ============================================================================
+
+
+class TestFlushPendingGating:
+    def test_pending_blocks_flush(self):
+        cm = ChangelogManager(storage_mode="test")
+        cm._pending_deliveries = 2
+        assert cm.flush() is False
+        cm._pending_deliveries = 0
+        assert cm.flush() is True
+
+    def test_delivery_error_blocks_flush_test_mode(self):
+        cm = ChangelogManager(storage_mode="test")
+        cm._delivery_errors.append("simulated broker NACK")
+        assert cm.flush() is False
+        cm.reset_delivery_errors()
+        assert cm.flush() is True
+
+
+class TestRocksDBProductionPath:
+    def test_production_uses_real_rdict(self, tmp_path):
+        pytest.importorskip("rocksdict")
+        store = RocksDBStateStore(
+            db_path=str(tmp_path / "prod"), partition_id=0, storage_mode="production"
+        )
+        assert store._rdict is not None
+        store.put("k1", {"avg": 3})
+        assert store.get("k1") == {"avg": 3}
+        assert [k for k, _ in store.scan("")] == ["k1"]
+        store.delete("k1")
+        assert store.get("k1") is None
+        store.close()
+
+    def test_production_close_reopen(self, tmp_path):
+        pytest.importorskip("rocksdict")
+        p = str(tmp_path / "reopen")
+        s1 = RocksDBStateStore(db_path=p, partition_id=2, storage_mode="production")
+        s1.put("a", {"v": 1})
+        s1.close()
+        s2 = RocksDBStateStore(db_path=p, partition_id=2, storage_mode="production")
+        assert s2.get("a") == {"v": 1}
+        s2.close()
+
+
+class TestLagHonesty:
+    def test_lag_unavailable_is_minus_one(self):
+        from streamforge.workers.worker_process import _get_real_lag
+
+        class NoAssign:
+            _consumer = type("C", (), {"assignment": lambda self: []})()
+
+        assert _get_real_lag(NoAssign(), None) == -1
+
+    def test_no_fabricated_zero_lag_default(self):
+        from streamforge.metrics.exporter import PrometheusMetricsExporter
+
+        ex = PrometheusMetricsExporter(service_name="test_svc_union")
+        assert ex.gauges["streamforge_consumer_lag"] == -1.0
+
+    def test_exporter_prometheus_text(self):
+        from streamforge.metrics.exporter import PrometheusMetricsExporter
+
+        ex = PrometheusMetricsExporter(service_name="test_svc_union2")
+        ex.record_event_processed(3)
+        text = ex.export_prometheus_text()
+        assert "streamforge_events_processed_total" in text
+        assert "streamforge_consumer_lag" in text
+
+
+# ============================================================================
+# APPENDED: PRODUCER EXPLICIT PARTITION (generator events carry CRC32)
+# ============================================================================
+
+
+class TestProducerExplicitPartitionExtra:
+    def test_generator_event_partition_passed_explicitly(self):
+        import zlib as _zlib
+
+        from streamforge.producers.kafka_producer import KafkaTelemetryProducer
+        from streamforge.producers.truck_telemetry import FleetTelemetryGenerator
+
+        prod = KafkaTelemetryProducer.__new__(KafkaTelemetryProducer)
+        prod.generator = FleetTelemetryGenerator(fleet_size=10, num_partitions=32)
+        seen = {}
+
+        class FakeProducer:
+            def produce(self, topic, key=None, value=None, partition=None, on_delivery=None):
+                seen["partition"] = partition
+
+            def poll(self, t):
+                return None
+
+        prod._producer = FakeProducer()
+        prod.topic = "fleet-telemetry"
+        prod._delivery = lambda e, m: None
+        e = prod.generator.generate_event(42)
+        expected = _zlib.crc32(e.truck_id.encode()) % 32
+        assert e.partition == expected
+        prod.produce_event(e)
+        assert seen["partition"] == expected
+
+
+# ============================================================================
+# APPENDED: API HONESTY
+# ============================================================================
+
+
+class TestAPIHonestyEndpoints:
+    @pytest.fixture()
+    def client(self, monkeypatch):
+        monkeypatch.setenv("STORAGE_MODE", "test")
+        from streamforge.config import reload_settings
+
+        reload_settings()
+        from fastapi.testclient import TestClient
+        from streamforge.api.main import app
+
+        return TestClient(app)
+
+    def test_health_reports_degraded_without_kafka(self, client):
+        r = client.get("/api/health")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["kafka"] in ("available", "unavailable", "unknown")
+        if body["kafka"] != "available":
+            assert body["status"] == "degraded"
+
+    def test_workers_target_vs_observed(self, client):
+        body = client.get("/api/workers").json()
+        assert "target_workers" in body and "observed_workers" in body
+
+    def test_partitions_no_fake_leader(self, client):
+        body = client.get("/api/partitions").json()
+        assert "partitions" in body
+        if body.get("status") == "degraded":
+            for p in body["partitions"]:
+                assert p.get("leader") is None
+
+    def test_changelog_demo_labelled(self, client):
+        body = client.get("/api/changelog?partition=0&limit=5").json()
+        assert body.get("mode") == "DEMO"
+
+    def test_windows_demo_labelled(self, client):
+        body = client.get("/api/windows/TRK-XXXX").json()
+        assert body.get("mode") == "DEMO"
+
+    def test_chaos_not_executed(self, client):
+        body = client.post("/api/chaos/kill-worker/worker-04").json()
+        assert body.get("executed") is False
+
+    def test_metrics_endpoint(self, client):
+        r = client.get("/metrics")
+        assert r.status_code == 200
+        assert "streamforge_" in r.text
+
+    def test_ws_metrics(self, client):
+        import json as _json
+
+        with client.websocket_connect("/ws/metrics") as ws:
+            data = _json.loads(ws.receive_text())
+            assert data["type"] == "metrics"
+            assert "counters" in data and "gauges" in data
+
+
+# ============================================================================
+# APPENDED: FRONTEND LIVE/DEMO SEPARATION
+# ============================================================================
+
+
+class TestFrontendLiveDemoSeparation:
+    import os as _os
+    ROOT = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), ".."))
+
+    def _read(self, rel):
+        import os
+
+        with open(os.path.join(self.ROOT, rel), encoding="utf-8", errors="ignore") as f:
+            return f.read()
+
+    def test_demo_starts_sim_only_in_demo(self):
+        src = self._read("src/App.tsx")
+        assert "IS_DEMO" in src
+
+    def test_live_topology_no_false_claims(self):
+        src = self._read("src/components/TopologyView.tsx")
+        assert "IS_DEMO" in src
+        assert "Exactly-Once" not in src
+        assert "Murmur2" not in src
+
+    def test_navbar_no_hardcoded_health(self):
+        src = self._read("src/components/Navbar.tsx")
+        assert "99.99%" not in src
+        assert "Unavailable" in src
+
+    def test_metrics_live_source(self):
+        src = self._read("src/components/MetricsDashboard.tsx")
+        assert "useLiveMetrics" in src and "IS_DEMO" in src
+
+    def test_chaos_honest(self):
+        src = self._read("src/components/ChaosStudio.tsx")
+        assert "/api/chaos/kill-worker" in src
+        assert "IS_DEMO" in src
+
+    def test_no_simulation_leak_in_live_paths(self):
+        for rel in [
+            "src/components/TopologyView.tsx",
+            "src/components/FleetMonitor.tsx",
+            "src/components/MetricsDashboard.tsx",
+            "src/components/RocksDBInspector.tsx",
+            "src/components/ChaosStudio.tsx",
+        ]:
+            src = self._read(rel)
+            assert "IS_DEMO" in src, f"{rel} must gate LIVE vs DEMO"

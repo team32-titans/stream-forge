@@ -5,8 +5,9 @@ Module: streamforge.producers.truck_telemetry
 Author: Member 1 (Stream Processing & Stateful Engine)
 
 Generates real-time IoT sensor readings for 50,000 refrigerated transport trucks.
-Capable of blasting 100,000+ events per second into Kafka partitions using
-CRC32 key hashing on truck_id.
+Partition routing uses deterministic CRC32 (zlib.crc32) on truck_id so the
+same truck always maps to the same Kafka partition across processes/runs.
+(Never use Python hash() — it is salted per-process and non-deterministic.)
 """
 
 import json
@@ -35,12 +36,7 @@ class FleetTelemetryGenerator:
         ]
 
     def _get_partition(self, truck_id: str) -> int:
-        """Deterministic CRC32 partitioning — stable across processes and restarts.
-
-        Python's built-in ``hash()`` is randomised per process (PYTHONHASHSEED)
-        and therefore not suitable for cross-process deterministic partitioning.
-        ``zlib.crc32`` produces a stable unsigned 32-bit hash.
-        """
+        """Deterministic CRC32 routing: partition = crc32(truck_id) % num_partitions."""
         return zlib.crc32(truck_id.encode("utf-8")) % self.num_partitions
 
     def generate_event(self, truck_index: int, inject_anomaly: bool = False) -> TruckTelemetryEvent:

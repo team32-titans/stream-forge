@@ -217,7 +217,7 @@ export const WindowingLab: React.FC = () => {
           <div className="p-4 bg-indigo-950/20 border border-indigo-500/30 rounded-2xl text-xs text-indigo-200 flex items-center gap-3">
             <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0" />
             <span className="leading-relaxed">
-              <strong>Member 1 Review Proof</strong>: O(1) memory per vehicle + Welford accumulator eliminates Python Garbage Collection stalls at 100k events/sec.
+              <strong>Member 1 Review Proof</strong>: O(1) memory per vehicle + Welford accumulator avoids per-window buffering (throughput measured in docs/BENCHMARK.md; 100k evt/s is a target).
             </span>
           </div>
         </div>

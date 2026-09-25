@@ -57,10 +57,14 @@ def on_assign(partitions):
             # Replay changelog
             assert changelog is not None
             changelog.restore_partition_state(pid, store, use_kafka_replay=(s.storage_mode == "production"))
-            # Reconstruct active (in-progress) window accumulators from recovered state
-            restored_active = proc.restore_from_store(store)
-            logger.info(f"[{worker_id}] Recovery done for partition {pid}: restored {restored_active} active window(s)")
+            _restore_processor_state(proc, store)
+            try:
+                restored_active = proc.restore_from_store(store)
+                logger.info(f"[{worker_id}] Active-window scan restored {restored_active} window(s) p={pid}")
+            except Exception as e:
+                logger.warning(f"restore_from_store failed p={pid}: {e}")
             exporter.gauges["streamforge_recovery_events_total"] = exporter.gauges.get("streamforge_recovery_events_total", 0) + 1
+            logger.info(f"[{worker_id}] Recovery done for partition {pid}")
         except Exception as e:
             logger.error(f"Failed to init partition {pid}: {e}")
 
@@ -80,25 +84,106 @@ def on_revoke(partitions):
 
 
 def _get_real_lag(consumer, s) -> int:
-    """Fetch real consumer lag via position vs high watermark (best effort)."""
+    """Fetch real consumer lag via position vs high watermark (best effort).
+
+    Returns total lag across assigned partitions, or -1 when the lag cannot
+    be determined (broker unreachable / no assignment). Never fabricates 0.
+    """
     try:
         # Use AdminClient to get high watermark is heavy; use consumer position if available
         # Fallback to 0 if not determinable
         from confluent_kafka import TopicPartition
 
         parts = consumer._consumer.assignment() if hasattr(consumer, "_consumer") else []
+        if not parts:
+            return -1
         total_lag = 0
+        determined = False
         for tp in parts:
             try:
                 low, high = consumer._consumer.get_watermark_offsets(tp, timeout=1)
                 pos = consumer._consumer.position([tp])
                 ppos = pos[0].offset if pos and pos[0].offset >= 0 else high
                 total_lag += max(0, high - ppos)
+                determined = True
             except Exception:
                 continue
-        return total_lag
+        return total_lag if determined else -1
     except Exception:
-        return 0
+        return -1
+
+
+def _persist_active_state(proc, store, changelog, worker_id: str, pid: int, source_offset: int) -> bool:
+    """Durably persist active (unemitted) accumulators + watermark.
+
+    Called after every accepted event so a replacement worker assigned this
+    partition can restore mid-window state via on_assign replay. Returns
+    False on any RocksDB/changelog failure so the caller blocks the commit.
+    """
+    try:
+        snap = proc.snapshot_state()
+    except Exception as e:
+        logger.error(f"Active snapshot failed p={pid}: {e}")
+        return False
+    ts_ms = int(time.time() * 1000)
+    try:
+        for key, entry in snap.get("active_windows", {}).items():
+            state_key = f"__active__:{key}"
+            val = {
+                "truck_id": entry["truck_id"],
+                "window_start": entry["window_start"],
+                "acc": entry["acc"],
+                "active": True,
+                "seq": source_offset,
+                "source_offset": source_offset,
+            }
+            store.put(state_key, val)
+            changelog.publish_state_change(
+                partition=pid, key=state_key, value=val,
+                worker_id=worker_id, timestamp=ts_ms, source_offset=source_offset,
+            )
+        wm = snap.get("watermark", {})
+        wm_val = {
+            "current_max_timestamp": wm.get("current_max_timestamp", 0),
+            "last_emitted_watermark": wm.get("last_emitted_watermark", 0),
+            "max_lateness_ms": wm.get("max_lateness_ms", 0),
+            "seq": source_offset,
+            "source_offset": source_offset,
+        }
+        store.put("__watermark__", wm_val)
+        changelog.publish_state_change(
+            partition=pid, key="__watermark__", value=wm_val,
+            worker_id=worker_id, timestamp=ts_ms, source_offset=source_offset,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Active state persist failed p={pid}: {e}")
+        return False
+
+
+def _restore_processor_state(proc, store) -> None:
+    """Rebuild in-memory accumulators + watermark from durable store keys."""
+    try:
+        wm = store.get("__watermark__")
+    except Exception:
+        wm = None
+    active: dict = {}
+    try:
+        for k, v in store.scan(prefix="__active__:"):
+            inner = k[len("__active__:"):]
+            if isinstance(v, dict) and "acc" in v:
+                active[inner] = {
+                    "truck_id": v.get("truck_id", inner.split(":")[0] if ":" in inner else ""),
+                    "window_start": v.get("window_start"),
+                    "acc": v["acc"],
+                }
+    except Exception as e:
+        logger.warning(f"Active scan failed during restore: {e}")
+    snap = {"active_windows": active, "watermark": wm or {}}
+    try:
+        proc.restore_state(snap)
+    except Exception as e:
+        logger.error(f"Processor restore failed: {e}")
 
 
 def main():
@@ -185,7 +270,18 @@ def main():
             latency_ms = (time.perf_counter() - t0) * 1000
             exporter.observe_latency(latency_ms / 1000.0)
 
-            # If event was late or filtered, results empty — count late
+            # Filtered events (T<=0): no state, no watermark, no changelog —
+            # but the offset can be committed (invalid data is skipped, not retried).
+            if evt.temperature is not None and float(evt.temperature) <= 0:
+                exporter.counters["streamforge_events_filtered_total"] = exporter.counters.get("streamforge_events_filtered_total", 0) + 1
+                exporter.counters["streamforge_events_processed_total"] += 1
+                try:
+                    consumer.commit(msg)
+                except Exception:
+                    pass
+                continue
+
+            # If event was late, results empty — count late
             if evt.is_late:
                 global late_events
                 late_events += 1
@@ -198,48 +294,12 @@ def main():
                     pass
                 continue
 
-
             changelog_ok = True
-            # Persist active (in-progress) window accumulators so recovery can
-            # reconstruct mid-window state.  Only accumulator state for the
-            # partition that owns this event needs updating.
-            for (truck_id, win_start), acc in proc.active_windows.items():
-                key = f"{truck_id}:{win_start}"
-                win_end = win_start + proc.assigner.window_size_ms
-                val = {
-                    "truck_id": truck_id,
-                    "window_start": win_start,
-                    "window_end": win_end,
-                    "active": True,  # marks in-progress window
-                    **acc.to_dict(),
-                    "seq": msg.offset(),
-                    "source_offset": msg.offset(),
-                }
-                try:
-                    store.put(key, val)
-                except Exception as e:
-                    logger.error(f"RocksDB put (active) failed p={pid} key={key}: {e}")
-                    exporter.counters["streamforge_events_failed_total"] += 1
-                    changelog_ok = False
-                    break
-                try:
-                    changelog.publish_state_change(
-                        partition=pid,
-                        key=key,
-                        value=val,
-                        worker_id=worker_id,
-                        timestamp=int(time.time() * 1000),
-                        source_offset=msg.offset(),
-                    )
-                except Exception as e:
-                    logger.error(f"Changelog publish (active) failed p={pid} key={key}: {e}")
-                    exporter.counters["streamforge_changelog_failures_total"] = exporter.counters.get("streamforge_changelog_failures_total", 0) + 1
-                    changelog_ok = False
-                    break
-                exporter.counters["streamforge_window_updates_total"] += 1
-
-            # Also persist finalized/emitted results (these windows were evicted
-            # from active_windows already).
+            # Durably persist ACTIVE (unemitted) accumulator state every event
+            # so a replacement worker can continue mid-window after a crash.
+            if not _persist_active_state(proc, store, changelog, worker_id, pid, msg.offset()):
+                exporter.counters["streamforge_events_failed_total"] += 1
+                changelog_ok = False
             if changelog_ok and results:
                 for res in results:
                     key = f"{res.truck_id}:{res.window_start}"
@@ -247,7 +307,6 @@ def main():
                     # Durable version = Kafka source offset (see changelog_manager protocol)
                     val["seq"] = msg.offset()
                     val["source_offset"] = msg.offset()
-                    val["active"] = False  # finalized window
                     try:
                         store.put(key, val)
                     except Exception as e:
@@ -271,14 +330,15 @@ def main():
                         break
                     exporter.counters["streamforge_window_updates_total"] += 1
 
-            # Crash consistency: commit only if RocksDB + changelog ack succeeded
+            # Crash consistency: commit only if RocksDB + changelog ack succeeded.
+            # In production the flush verifies delivery callbacks; in demo/test
+            # the in-memory flush trivially succeeds.
             if changelog_ok:
-                if s.storage_mode == "production" or getattr(changelog, "_producer", None) is not None:
-                    flushed = changelog.flush(timeout=5)
-                    if not flushed or changelog.delivery_errors:
-                        logger.error("Changelog flush/delivery failed — NOT committing source offset, will redeliver")
-                        exporter.counters["streamforge_changelog_failures_total"] = exporter.counters.get("streamforge_changelog_failures_total", 0) + 1
-                        changelog_ok = False
+                flushed = changelog.flush(timeout=5)
+                if not flushed:
+                    logger.error("Changelog flush failed — NOT committing source offset, will redeliver")
+                    exporter.counters["streamforge_changelog_failures_total"] = exporter.counters.get("streamforge_changelog_failures_total", 0) + 1
+                    changelog_ok = False
                 if changelog_ok:
                     try:
                         consumer.commit(msg)
@@ -292,14 +352,15 @@ def main():
             exporter.counters["streamforge_events_processed_total"] += 1
             exporter.counters["streamforge_partition_events_total"] = exporter.counters.get("streamforge_partition_events_total", 0) + 1
             events_in_interval += 1
-            # Real lag every 5s (avoid per-message overhead)
+            # Real lag every 5s (avoid per-message overhead); -1 = unavailable
             now_lag = time.time()
             if now_lag - last_report >= 5 or events_in_interval % 100 == 0:
                 try:
-                    exporter.gauges["streamforge_consumer_lag"] = _get_real_lag(consumer, s)
-                    exporter.set_lag(int(exporter.gauges["streamforge_consumer_lag"]))
+                    lag = _get_real_lag(consumer, s)
+                    exporter.gauges["streamforge_consumer_lag"] = lag
+                    exporter.set_lag(int(lag))
                 except Exception:
-                    pass
+                    exporter.gauges["streamforge_consumer_lag"] = -1
 
             # Heartbeat throughput every 5s
             now = time.time()

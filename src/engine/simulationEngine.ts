@@ -7,6 +7,7 @@ import {
   WindowAggregate,
   WorkerNode,
 } from '../types/stream';
+import type { ConnectionStatus } from '../lib/api';
 
 export class StreamForgeSimulation {
   public workers: WorkerNode[] = [];
@@ -18,6 +19,9 @@ export class StreamForgeSimulation {
   public chaosHistory: ChaosEvent[] = [];
   public currentChaosEvent: ChaosEvent | null = null;
   public metrics: StreamMetrics;
+  /** DEMO-only connection badge state (LIVE mode never reads this). */
+  public connectionStatus: ConnectionStatus = 'CONNECTING';
+  private liveBackendEnabled: boolean = false;
   
   private isRunning: boolean = true;
   private eventRate: number = 25000; // default 25,000 events/sec simulated
@@ -214,6 +218,12 @@ export class StreamForgeSimulation {
 
   public getIsRunning(): boolean {
     return this.isRunning;
+  }
+
+  /** DEMO-only mode switch helper (LIVE mode never calls this). */
+  public setLiveBackendEnabled(enabled: boolean): void {
+    this.liveBackendEnabled = enabled;
+    this.notify();
   }
 
   private tick(): void {

@@ -102,7 +102,7 @@ py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-python -m pytest -q  # 56 passed
+python -m pytest -q  # 82 passed (16 engine/hardening + 66 regression)
 ```
 
 ### Env
@@ -196,8 +196,14 @@ See `docs/STATE_CHANGELOG_PROTOCOL.md`.
 ## 15. Tests
 
 ```powershell
-python -m pytest -v  # 56 tests
-# - config, producer affinity (Option B), Welford stddev+m2 persistence, filter T>0, watermark/late (on-time/within/beyond/out-of-order), active window store recovery, changelog seq=source_offset, dup idempotent, stale newer overwrites, failure gating (no commit on changelog fail or delivery callback error), crash recovery (partition 6)
+python -m pytest -v  # 82 tests
+# - config, producer affinity (CRC32), Welford stddev+m2 persistence, filter T>0 (7 cases),
+#   watermark/late (on-time/within/beyond/multiple/state+watermark isolation/monotonic),
+#   window [start,end) boundaries, active+watermark recovery (RUN A vs RUN B),
+#   changelog seq=source_offset, dup idempotent, stale newer overwrites, delivery/pending
+#   flush gating (commit blocked on failure), real RocksDB prod path, lag -1 unavailable,
+#   Prometheus updates, API honesty (health/workers/partitions/windows/changelog/chaos/WS),
+#   frontend LIVE/DEMO separation (no sim leak, no hardcoded 99.99/Exactly-Once/Murmur2)
 ```
 
 Integration tests requiring Kafka/Docker are marked and skipped when broker unavailable.

@@ -172,7 +172,7 @@ export const AIModelLab: React.FC = () => {
         {
           role: 'model',
           content:
-            'StreamForge architecture uses Cooperative Sticky Partition Rebalancing with RocksDB changelog replay for durable partition recovery and Welford O(1) rolling average window aggregation.',
+            'StreamForge architecture uses cooperative-sticky consumer-group rebalancing with Kafka changelog replay (effectively-once: at-least-once + idempotent seq=source_offset state) and Welford O(1) rolling average window aggregation. RPO/RTO are measured per deployment, not pre-claimed.',
           provider: 'StreamForge Architecture Engine',
           timestamp: new Date().toLocaleTimeString(),
         },
@@ -499,7 +499,7 @@ export const AIModelLab: React.FC = () => {
               <div className="flex flex-wrap gap-1.5">
                 {[
                   'Explain Welford O(1) math vs sliding queues',
-                  'How RocksDB WAL guarantees RPO=0 on crash',
+                  'How RocksDB + changelog replay bounds loss on crash (RPO/RTO measured)',
                   'Why Cooperative Sticky is superior to Round-Robin',
                   'Telemetry indicators before 0.0°C alarm',
                 ].map((promptText, i) => (

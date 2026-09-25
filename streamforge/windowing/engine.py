@@ -36,6 +36,8 @@ class TemperatureAccumulator:
 
     def add(self, temp: float) -> None:
         """Incorporate a new temperature sample into the running statistics."""
+        # Correct Welford's online algorithm: delta uses OLD mean.
+        old_mean = self.sum_temp / self.count if self.count > 0 else temp
         self.count += 1
         self.sum_temp += temp
         if temp < self.min_temp:
@@ -43,9 +45,9 @@ class TemperatureAccumulator:
         if temp > self.max_temp:
             self.max_temp = temp
 
-        # Online variance calculation (Welford's method)
-        delta = temp - (self.sum_temp / self.count)
-        delta2 = temp - ((self.sum_temp + temp) / (self.count + 1) if self.count > 0 else temp)
+        new_mean = self.sum_temp / self.count
+        delta = temp - old_mean
+        delta2 = temp - new_mean
         self._m2 += delta * delta2
 
     @property
@@ -71,6 +73,7 @@ class TemperatureAccumulator:
             "min": self.min_temp if self.count > 0 else 0.0,
             "max": self.max_temp if self.count > 0 else 0.0,
             "std_dev": self.std_dev,
+            "m2": round(self._m2, 4),
         }
 
     @classmethod
@@ -80,6 +83,7 @@ class TemperatureAccumulator:
         acc.sum_temp = float(data.get("sum", 0.0))
         acc.min_temp = float(data.get("min", float("inf")))
         acc.max_temp = float(data.get("max", float("-inf")))
+        acc._m2 = float(data.get("m2", 0.0))
         return acc
 
 
@@ -169,18 +173,46 @@ class WindowedRollingAverageProcessor:
         # State: mapping of (truck_id, window_start) -> TemperatureAccumulator
         self.active_windows: Dict[Tuple[str, int], TemperatureAccumulator] = {}
 
+    def _late_policy(self) -> str:
+        """Read LATE_EVENT_POLICY without hard dependency on config at import time."""
+        try:
+            from streamforge.config import get_settings
+
+            return get_settings().late_event_policy
+        except Exception:
+            return "side_output"
+
     def process_telemetry(
         self, event: TruckTelemetryEvent
-    ) -> Tuple[Optional[WindowedAggregateResult], List[WindowedAggregateResult]]:
+    ) -> Tuple[Optional[TruckTelemetryEvent], List[WindowedAggregateResult]]:
         """
-        1. Evaluates watermark against event timestamp.
-        2. Assigns event to appropriate 5-minute windows.
-        3. Updates rolling accumulator.
-        4. Evaluates window closure and triggers emission of completed aggregates.
+        1. Filters temperature <= 0 (cold-chain anomaly pipeline keeps T>0 only).
+        2. Evaluates watermark against event timestamp.
+        3. Assigns event to appropriate 5-minute windows.
+        4. Updates rolling accumulator.
+        5. Evaluates window closure and triggers emission of completed aggregates.
         """
+        # Pipeline filter: only T>0 events carry thermal anomaly signal.
+        # Filtered events do not advance the watermark and create no windows.
+        if event.temperature <= 0:
+            event.is_late = False
+            return (None, [])
+
+        # Late check against current watermark BEFORE advancing with this event.
+        if self.watermark_gen.is_event_late(event.timestamp):
+            event.is_late = True
+            if self._late_policy() == "side_output":
+                return (event, [])
+            return (None, [])
+
         watermark = self.watermark_gen.on_event(event.timestamp)
+        # Re-check after advancing (event could itself be exactly on watermark edge)
         is_late = self.watermark_gen.is_event_late(event.timestamp)
         event.is_late = is_late
+        if is_late:
+            if self._late_policy() == "side_output":
+                return (event, [])
+            return (None, [])
 
         assigned_windows = self.assigner.assign_windows(event.timestamp)
         
@@ -227,9 +259,14 @@ class WindowedRollingAverageProcessor:
     def restore_active_window(
         self, truck_id: str, window_start: int, state: Dict[str, Any]
     ) -> None:
-        """Restore in-progress window accumulator from persisted state dictionary."""
+        """Restore in-progress window accumulator from persisted state dictionary.
+
+        Accepts either a flat accumulator dict (count/sum/min/max/m2) or the
+        worker envelope {acc: {...}, ...}.
+        """
+        payload = state.get("acc") if isinstance(state.get("acc"), dict) else state
         state_key = (truck_id, window_start)
-        self.active_windows[state_key] = TemperatureAccumulator.from_dict(state)
+        self.active_windows[state_key] = TemperatureAccumulator.from_dict(payload)
 
     def restore_from_store(self, store: StateStore[str, Dict[str, Any]]) -> int:
         """Scan state store and reconstruct all active (in-progress) window accumulators."""
@@ -244,4 +281,56 @@ class WindowedRollingAverageProcessor:
                     self.restore_active_window(str(truck_id), int(win_start), val)
                     restored += 1
         return restored
+
+    def snapshot_state(self) -> Dict:
+        """Serialize full mutable runtime state for durable recovery.
+
+        Captures active (unemitted) accumulators including Welford M2 plus
+        watermark progress (max seen event time + last emitted watermark).
+        The worker persists this per partition so a replacement worker can
+        continue mid-window aggregation without loss.
+        """
+        return {
+            "active_windows": {
+                f"{truck_id}:{win_start}": {
+                    "truck_id": truck_id,
+                    "window_start": win_start,
+                    "acc": acc.to_dict(),
+                }
+                for (truck_id, win_start), acc in self.active_windows.items()
+            },
+            "watermark": {
+                "current_max_timestamp": self.watermark_gen.current_max_timestamp,
+                "last_emitted_watermark": self.watermark_gen.last_emitted_watermark,
+                "max_lateness_ms": self.watermark_gen.max_lateness_ms,
+            },
+        }
+
+    def restore_state(self, snapshot: Dict) -> None:
+        """Restore runtime state previously captured by snapshot_state()."""
+        active = snapshot.get("active_windows", {}) if isinstance(snapshot, dict) else {}
+        self.active_windows.clear()
+        for _key, entry in active.items():
+            try:
+                truck_id = entry["truck_id"]
+                win_start = int(entry["window_start"])
+                acc = TemperatureAccumulator.from_dict(entry["acc"])
+                self.active_windows[(truck_id, win_start)] = acc
+            except Exception:
+                continue
+        wm = snapshot.get("watermark", {}) if isinstance(snapshot, dict) else {}
+        try:
+            cur_max = int(wm.get("current_max_timestamp", 0))
+            last = int(wm.get("last_emitted_watermark", 0))
+            # Monotonicity: never move the restored watermark backward
+            # relative to already-emitted progress; take values as stored
+            # (stored values are already monotonic).
+            self.watermark_gen.current_max_timestamp = max(
+                self.watermark_gen.current_max_timestamp, cur_max
+            )
+            self.watermark_gen.last_emitted_watermark = max(
+                self.watermark_gen.last_emitted_watermark, last
+            )
+        except Exception:
+            pass
 

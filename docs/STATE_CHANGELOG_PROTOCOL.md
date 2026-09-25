@@ -1,6 +1,6 @@
 # StreamForge State / Changelog / Recovery Protocol
 
-**Status: Design-First (Phase 6) — must be reviewed before changelog implementation.**
+**Status: Implemented and tested (see tests/test_regression.py — active recovery, watermark restore, idempotent replay).**
 
 ## 1. Goal
 Guarantee partition-aware, idempotent state recovery with no silent loss, without falsely claiming exactly-once.
@@ -9,6 +9,7 @@ Guarantee partition-aware, idempotent state recovery with no silent loss, withou
 `state_key = f"{truck_id}:{window_start_ms}"` where `window_start_ms = timestamp - (timestamp % WINDOW_SIZE_MS)` (tumbling 5min). Example `TRK-00492:1709280000000`.
 
 ## 3. RocksDB Value Schema (versioned)
+Finalized window value:
 ```json
 {
   "schema_version": 1,
@@ -26,6 +27,10 @@ Guarantee partition-aware, idempotent state recovery with no silent loss, withou
   "worker_id": "worker-04"
 }
 ```
+Active (unemitted) accumulator keys `__active__:{truck_id}:{window_start}` persist
+`{truck_id, window_start, acc: {count, sum, avg, min, max, std_dev, m2}, active: true, seq, source_offset}`
+so a replacement worker restores mid-window Welford M2 exactly. Watermark key
+`__watermark__` persists `{current_max_timestamp, last_emitted_watermark, max_lateness_ms, seq}`.
 `seq` = durable version = **Kafka source offset** per `(partition, state_key)` (monotonic per partition). Invariant: `partition+state_key -> seq` never moves backwards; worker restart/reassignment cannot reset it; stale replay with smaller seq never overwrites newer. In production, `seq == source_offset`; in demo/test where offset unavailable, fallback counter is non-durable and explicitly documented.
 
 ## 4. Changelog Topic
